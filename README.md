@@ -47,11 +47,18 @@ wasm-bindgen --keep-debug --target web ...
 |----------|--------|
 | Chrome   | Full frames with demangled function names + WASM byte offsets |
 | Firefox  | Full frames with demangled function names + WASM byte offsets |
-| Safari   | Frames dropped (`wasm-stub@[native code]` carries no useful data) |
+| Safari   | Full frames with demangled function names (no byte offsets) |
 
-For Safari, supplement with `PanicHookInfo::location()` to get the panic site's file/line/col.
+Safari/WebKit nondeterministically drops WASM function names from `Error.stack`. The `name-section` feature (on by default) works around this by reading the WASM binary's name section at runtime via `WebAssembly.Module.customSections()` and backfilling any missing names automatically.
 
 ## Features
+
+- `name-section` — resolves missing WASM function names at runtime from the binary's name section. Required for reliable Safari support:
+
+  ```toml
+  [dependencies]
+  wacks = { version = "0.1", features = ["name-section"] }
+  ```
 
 - `serde` — derives `Serialize` / `Deserialize` on `Frame`
 

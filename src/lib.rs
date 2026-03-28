@@ -29,29 +29,34 @@
 //! assert_eq!(frames[0].function.as_deref(), Some("my_crate::handler"));
 //! ```
 
-#[cfg(target_arch = "wasm32")]
-mod capture;
 mod demangle;
 mod format;
 mod frame;
 mod parse;
 
-#[cfg(target_arch = "wasm32")]
-use std::panic::{set_hook, PanicHookInfo};
-
-#[cfg(target_arch = "wasm32")]
-pub use capture::capture;
 pub use frame::Frame;
 
-/// Install a panic hook that passes structured frames to `callback`.
-///
-/// This is a convenience wrapper around [`std::panic::set_hook`] +
-/// [`capture`]. For more control, call [`capture`] directly inside
-/// your own hook.
-#[cfg(target_arch = "wasm32")]
-pub fn set_panic_hook(callback: fn(Vec<Frame>, &PanicHookInfo<'_>)) {
-    set_hook(Box::new(move |info| {
-        let frames = capture::capture();
-        callback(frames, info);
-    }));
+#[cfg(feature = "name-section")]
+mod namesec;
+
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        mod capture;
+
+        use std::panic::{set_hook, PanicHookInfo};
+
+        pub use capture::capture;
+
+        /// Install a panic hook that passes structured frames to `callback`.
+        ///
+        /// This is a convenience wrapper around [`std::panic::set_hook`] +
+        /// [`capture`]. For more control, call [`capture`] directly inside
+        /// your own hook.
+        pub fn set_panic_hook(callback: fn(Vec<Frame>, &PanicHookInfo<'_>)) {
+            set_hook(Box::new(move |info| {
+                let frames = capture::capture();
+                callback(frames, info);
+            }));
+        }
+    }
 }

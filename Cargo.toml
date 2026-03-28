@@ -6,6 +6,8 @@ description = "Structured WASM panic stack traces for browsers"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+cfg-if = "1"
+leb128 = { version = "0.2", optional = true }
 rustc-demangle = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
 
@@ -14,4 +16,5 @@ wasm-bindgen = "0.2"
 
 [features]
 default = []
+name-section = ["dep:leb128"]
 serde = ["dep:serde"]
