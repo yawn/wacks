@@ -1,18 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-interface Frame {
-  function: string | null;
-  raw_function: string | null;
-  filename: string | null;
-  lineno: number | null;
-  colno: number | null;
-  wasm_function_index: number | null;
-  wasm_byte_offset: number | null;
-  in_app: boolean;
-}
-
-let rawFrames: Frame[];
-let capturedFrames: Frame[];
+let rawFrames: any[];
+let capturedFrames: any[];
 
 test.beforeEach(async ({ page }) => {
   await page.goto("http://localhost:3333");
@@ -22,90 +11,71 @@ test.beforeEach(async ({ page }) => {
   capturedFrames = await page.evaluate(() => (window as any).__captured_frames);
 });
 
-// ---------------------------------------------------------------------------
-// Raw Frame::parse() — native browser behavior, no name section backfill
-// ---------------------------------------------------------------------------
+const wasmOf = (frames: any[]) =>
+  frames.filter((f) => f.wasm_function_index != null);
+
+const namedWasmOf = (frames: any[]) =>
+  wasmOf(frames).filter((f) => f.function);
 
 test.describe("raw (Frame::parse)", () => {
   test("captures wasm frames", async ({ browserName }) => {
-    const wasmFrames = rawFrames.filter((f) => f.wasm_function_index != null);
-    expect(wasmFrames.length).toBeGreaterThanOrEqual(3);
+    expect(wasmOf(rawFrames).length).toBeGreaterThanOrEqual(3);
 
     // WebKit nondeterministically drops WASM names from Error.stack
     if (browserName === "webkit") return;
 
-    const names = wasmFrames
-      .map((f) => f.function)
-      .filter(Boolean) as string[];
+    const names = namedWasmOf(rawFrames).map((f) => f.function);
     expect(names.some((n) => n.includes("trigger_panic"))).toBe(true);
     expect(names.some((n) => n.includes("panic"))).toBe(true);
   });
 
   test("chrome and firefox provide byte offsets", async ({ browserName }) => {
     test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
-
-    const wasmFrames = rawFrames.filter(
-      (f) => f.wasm_function_index != null
+    expect(wasmOf(rawFrames).every((f) => f.wasm_byte_offset != null)).toBe(
+      true
     );
-    expect(wasmFrames.every((f) => f.wasm_byte_offset != null)).toBe(true);
   });
 
   test("webkit provides function index without byte offset", async ({
     browserName,
   }) => {
     test.skip(browserName !== "webkit", "WebKit-specific");
-
-    const wasmFrames = rawFrames.filter(
-      (f) => f.wasm_function_index != null
-    );
-    expect(wasmFrames.length).toBeGreaterThan(0);
-    expect(wasmFrames.every((f) => f.wasm_byte_offset == null)).toBe(true);
+    const wasm = wasmOf(rawFrames);
+    expect(wasm.length).toBeGreaterThan(0);
+    expect(wasm.every((f) => f.wasm_byte_offset == null)).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// capture() — parse + name section backfill, should work on all browsers
-// ---------------------------------------------------------------------------
-
 test.describe("capture()", () => {
   test("captures named wasm frames", async () => {
-    const wasmFrames = capturedFrames.filter(
-      (f) => f.wasm_function_index != null
-    );
-    expect(wasmFrames.length).toBeGreaterThanOrEqual(3);
+    expect(wasmOf(capturedFrames).length).toBeGreaterThanOrEqual(3);
 
-    const names = wasmFrames
-      .map((f) => f.function)
-      .filter(Boolean) as string[];
+    const names = namedWasmOf(capturedFrames).map((f) => f.function);
     expect(names.some((n) => n.includes("trigger_panic"))).toBe(true);
     expect(names.some((n) => n.includes("panic"))).toBe(true);
   });
 
   test("demangled names strip hash suffix", async () => {
-    const wasmNamed = capturedFrames.filter(
-      (f) => f.wasm_function_index != null && f.function
-    );
+    const wasm = namedWasmOf(capturedFrames);
 
-    for (const f of wasmNamed) {
+    for (const f of wasm) {
       expect(f.function).not.toMatch(/::h[0-9a-f]{5,}$/);
     }
 
-    const withHash = wasmNamed.filter(
-      (f) => f.raw_function && f.raw_function !== f.function
-    );
+    const withHash = wasm.filter((f) => f.raw_function && f.raw_function !== f.function);
     expect(withHash.length).toBeGreaterThan(0);
     expect(
-      withHash.some((f) => /::h[0-9a-f]{5,}$/.test(f.raw_function!))
+      withHash.some((f) => /::h[0-9a-f]{5,}$/.test(f.raw_function))
     ).toBe(true);
   });
 
   test("in_app classifies std/core as infrastructure", async () => {
-    const infraFrames = capturedFrames.filter(
+    const infra = capturedFrames.filter(
       (f) => !f.in_app && f.wasm_function_index != null
     );
-    expect(infraFrames.length).toBeGreaterThan(0);
+    expect(infra.length).toBeGreaterThan(0);
 
-    for (const f of infraFrames) {
+    for (const f of infra) {
       expect(f.function).toMatch(/^(std::|core::|alloc::|__rustc)/);
     }
 
@@ -116,11 +86,7 @@ test.describe("capture()", () => {
   });
 
   test("module prefix is stripped", async () => {
-    const wasmNamed = capturedFrames.filter(
-      (f) => f.wasm_function_index != null && f.function
-    );
-
-    for (const f of wasmNamed) {
+    for (const f of namedWasmOf(capturedFrames)) {
       expect(f.function).not.toContain(".wasm.");
       expect(f.raw_function).not.toContain(".wasm.");
     }
