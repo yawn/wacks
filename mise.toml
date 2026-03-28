@@ -6,7 +6,7 @@ node = "lts"
 rust = "latest"
 
 [hooks]
-postinstall = "npx playwright install --with-deps chromium firefox webkit"
+postinstall = "cd tests/e2e && npm install && npx playwright install --with-deps chromium firefox webkit"
 
 [tasks."build:e2e"]
 description = "Build the WASM fixture for e2e tests"
