@@ -76,7 +76,8 @@ export function __wacks_capture_stack() { return new Error().stack || ''; }
 /// from the WASM name section automatically.
 pub fn capture() -> Vec<Frame> {
     let stack = capture_stack();
-    let frames = Frame::parse(&stack);
+    #[allow(unused_mut)]
+    let mut frames = Frame::parse(&stack);
     #[cfg(feature = "name-section")]
     backfill_names(&mut frames);
     frames
