@@ -1,5 +1,7 @@
 # wacks
 
+[![CI](https://github.com/yawn/wacks/actions/workflows/ci.yml/badge.svg)](https://github.com/yawn/wacks/actions/workflows/ci.yml)
+
 Structured WASM panic stack traces for browsers.
 
 `wacks` captures `Error.stack` from inside a WASM panic hook, parses it into structured `Frame`s across Chrome, Firefox, and Safari, and demangles Rust symbols — giving you data suitable for error reporting services (PostHog, Sentry, Datadog, etc.).
