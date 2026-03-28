@@ -1,0 +1,17 @@
+[package]
+name = "wacks"
+version = "0.1.0"
+edition = "2024"
+description = "Structured WASM panic stack traces for browsers"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+rustc-demangle = "0.1"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[features]
+default = []
+serde = ["dep:serde"]
