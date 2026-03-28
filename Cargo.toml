@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "Structured WASM panic stack traces for browsers"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/yawn/wacks"
+readme = "README.md"
+keywords = ["wasm", "panic", "stacktrace", "debugging", "wasm-bindgen"]
+categories = ["wasm", "development-tools::debugging"]
 
 [dependencies]
 cfg-if = "1"
