@@ -1,0 +1,5 @@
+/target
+/tests/e2e/fixture/target/
+/tests/e2e/node_modules/
+/tests/e2e/static/pkg/
+/tests/e2e/test-results/

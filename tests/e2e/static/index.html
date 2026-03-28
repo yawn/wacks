@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><title>wacks e2e</title></head>
+<body>
+<script type="module">
+  import init, { trigger_panic } from './pkg/wacks_test_fixture.js';
+
+  // V8 limits Error.stack to 10 frames by default
+  Error.stackTraceLimit = 50;
+
+  await init();
+
+  window.triggerPanic = () => {
+    try {
+      trigger_panic();
+    } catch (e) {
+      // Expected: panics become JS exceptions via wasm-bindgen
+    }
+  };
+
+  window.__wasm_ready = true;
+</script>
+</body>
+</html>

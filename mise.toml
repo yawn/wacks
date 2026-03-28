@@ -1,0 +1,24 @@
+[tools]
+"cargo:wasm-bindgen-cli" = "latest"
+"cargo:wasm-pack" = "latest"
+"npm:playwright" = "latest"
+node = "lts"
+rust = "latest"
+
+[hooks]
+postinstall = "npx playwright install --with-deps chromium firefox webkit"
+
+[tasks."build:e2e"]
+description = "Build the WASM fixture for e2e tests"
+dir = "tests/e2e"
+run = "wasm-pack build fixture --target web --out-dir ../static/pkg"
+
+[tasks."test:unit"]
+description = "Run unit tests on the native target"
+run = "cargo test --target $(rustc -vV | awk '/^host:/ { print $2 }')"
+
+[tasks."test:e2e"]
+description = "Run Playwright end-to-end tests across browsers"
+depends = ["build:e2e"]
+dir = "tests/e2e"
+run = "npx playwright test"
