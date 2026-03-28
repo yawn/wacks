@@ -67,23 +67,23 @@ impl JsLocation {
     /// Parses from the right to avoid tripping on colons in URLs
     /// (e.g. `http://localhost:3030/index.js:187:13`).
     pub(crate) fn parse(location: &str) -> Self {
-        if let Some((rest, col_str)) = location.rsplit_once(':') {
-            if let Ok(col) = col_str.parse::<u32>() {
-                if let Some((url, line_str)) = rest.rsplit_once(':') {
-                    if let Ok(line) = line_str.parse::<u32>() {
-                        return Self {
-                            colno: Some(col),
-                            filename: Some(url.to_string()),
-                            lineno: Some(line),
-                        };
-                    }
-                }
+        if let Some((rest, col_str)) = location.rsplit_once(':')
+            && let Ok(col) = col_str.parse::<u32>()
+        {
+            if let Some((url, line_str)) = rest.rsplit_once(':')
+                && let Ok(line) = line_str.parse::<u32>()
+            {
                 return Self {
-                    colno: None,
-                    filename: Some(rest.to_string()),
-                    lineno: Some(col),
+                    colno: Some(col),
+                    filename: Some(url.to_string()),
+                    lineno: Some(line),
                 };
             }
+            return Self {
+                colno: None,
+                filename: Some(rest.to_string()),
+                lineno: Some(col),
+            };
         }
 
         if location.is_empty() {
@@ -172,8 +172,8 @@ impl WasmLocation {
     pub(crate) fn parse(location: &str) -> Self {
         let after_marker = if let Some(pos) = location.find(":wasm-function[") {
             &location[pos + ":wasm-function[".len()..]
-        } else if location.starts_with("wasm-function[") {
-            &location["wasm-function[".len()..]
+        } else if let Some(stripped) = location.strip_prefix("wasm-function[") {
+            stripped
         } else {
             return Self { byte_offset: None, function_index: None };
         };
