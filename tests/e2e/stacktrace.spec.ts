@@ -92,3 +92,49 @@ test.describe("capture()", () => {
     }
   });
 });
+
+test.describe("source map", () => {
+  let frames: any[];
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("http://localhost:3333");
+    await page.waitForFunction(() => (window as any).__wasm_ready === true);
+
+    await page.evaluate(async () => {
+      const resp = await fetch("./pkg/wacks_test_fixture_bg.wasm.map");
+      const json = await resp.text();
+      (window as any).setup_source_map(json);
+    });
+
+    await page.evaluate(() => (window as any).triggerPanic());
+    frames = await page.evaluate(() => (window as any).__captured_frames);
+  });
+
+  test("resolves source file for wasm frames", async ({ browserName }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+    const wasm = wasmOf(frames).filter((f) => f.filename);
+    expect(wasm.length).toBeGreaterThan(0);
+
+    for (const f of wasm) {
+      expect(f.filename).toMatch(/\.rs$/);
+      expect(f.lineno).toBeGreaterThan(0);
+    }
+  });
+
+  test("fixture functions resolve to fixture source", async ({
+    browserName,
+  }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+    const fixture = frames.filter(
+      (f) =>
+        f.filename &&
+        f.function &&
+        /^wacks_test_fixture::level_\d$/.test(f.function)
+    );
+    expect(fixture.length).toBeGreaterThan(0);
+
+    for (const f of fixture) {
+      expect(f.filename).toContain("lib.rs");
+    }
+  });
+});

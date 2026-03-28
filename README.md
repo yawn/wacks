@@ -53,6 +53,28 @@ wasm-bindgen --keep-debug --target web ...
 
 Safari/WebKit nondeterministically drops WASM function names from `Error.stack`. The `name-section` feature (on by default) works around this by reading the WASM binary's name section at runtime via `WebAssembly.Module.customSections()` and backfilling any missing names automatically.
 
+## Source map support
+
+### Runtime resolution (`source-map`)
+
+The `source-map` feature resolves WASM byte offsets to original source locations using a source map v3 JSON file:
+
+```toml
+[dependencies]
+wacks = { version = "0.1", features = ["source-map"] }
+```
+
+### Generating source maps (`wasm2map`)
+
+The `wasm2map` binary converts DWARF debug info embedded in a WASM binary to a source map v3 JSON file:
+
+```sh
+cargo install wacks --features source-map-gen
+wasm2map input.wasm output.wasm.map
+```
+
+This requires `debug = "line-tables-only"` (or higher) in your release profile.
+
 ## Features
 
 - `name-section` — resolves missing WASM function names at runtime from the binary's name section. Required for reliable Safari support:
@@ -62,6 +84,8 @@ Safari/WebKit nondeterministically drops WASM function names from `Error.stack`.
   wacks = { version = "0.1", features = ["name-section"] }
   ```
 
+- `source-map` — resolves WASM byte offsets to original file/line/column via a source map v3 file
+- `source-map-gen` — builds the `wasm2map` binary for generating source maps from DWARF debug info
 - `serde` — derives `Serialize` / `Deserialize` on `Frame`
 
 ## License

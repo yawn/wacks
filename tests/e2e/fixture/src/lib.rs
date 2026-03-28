@@ -56,6 +56,11 @@ fn level_3() {
 }
 
 #[wasm_bindgen]
+pub fn setup_source_map(json: &str) {
+    wacks::init_source_map(json);
+}
+
+#[wasm_bindgen]
 pub fn trigger_panic() {
     level_1();
 }

@@ -3,13 +3,14 @@
 <head><title>wacks e2e</title></head>
 <body>
 <script type="module">
-  import init, { trigger_panic } from './pkg/wacks_test_fixture.js';
+  import init, { trigger_panic, setup_source_map } from './pkg/wacks_test_fixture.js';
 
   // V8 limits Error.stack to 10 frames by default
   Error.stackTraceLimit = 50;
 
   await init();
 
+  window.setup_source_map = setup_source_map;
   window.triggerPanic = () => {
     try {
       trigger_panic();

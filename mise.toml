@@ -11,7 +11,10 @@ postinstall = "cd tests/e2e && npm install && npx playwright install --with-deps
 [tasks."build:e2e"]
 description = "Build the WASM fixture for e2e tests"
 dir = "tests/e2e"
-run = "wasm-pack build fixture --target web --out-dir ../static/pkg"
+run = """
+wasm-pack build fixture --target web --out-dir ../static/pkg
+cargo run --bin wasm2map --features source-map-gen --manifest-path ../../Cargo.toml --target "$(rustc -vV | awk '/^host:/ { print $2 }')" -- static/pkg/wacks_test_fixture_bg.wasm static/pkg/wacks_test_fixture_bg.wasm.map
+"""
 
 [tasks."test:unit"]
 description = "Run unit tests on the native target"

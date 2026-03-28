@@ -36,9 +36,7 @@ impl fmt::Display for Frame {
             Some(name) => write!(f, "{name}")?,
             None => write!(f, "<unknown>")?,
         }
-        if let (Some(idx), Some(offset)) = (self.wasm_function_index, self.wasm_byte_offset) {
-            write!(f, " at wasm-function[{idx}]:0x{offset:x}")?;
-        } else if let Some(filename) = &self.filename {
+        if let Some(filename) = &self.filename {
             write!(f, " at {filename}")?;
             if let Some(line) = self.lineno {
                 write!(f, ":{line}")?;
@@ -46,6 +44,8 @@ impl fmt::Display for Frame {
                     write!(f, ":{col}")?;
                 }
             }
+        } else if let (Some(idx), Some(offset)) = (self.wasm_function_index, self.wasm_byte_offset) {
+            write!(f, " at wasm-function[{idx}]:0x{offset:x}")?;
         }
         Ok(())
     }

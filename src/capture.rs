@@ -68,6 +68,45 @@ export function __wacks_capture_stack() { return new Error().stack || ''; }
     }
 }
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "source-map")] {
+        use std::cell::OnceCell as SourceMapCell;
+
+        use crate::sourcemap::SourceMap;
+
+        thread_local! {
+            static SOURCE_MAP: SourceMapCell<Option<SourceMap>> = const { SourceMapCell::new() };
+        }
+
+        /// Initialize source location resolution from a source map JSON string.
+        ///
+        /// Parses the [source map v3][spec] and caches the result. Subsequent calls
+        /// to [`capture`] will use it to fill `filename`, `lineno`, and `colno` on
+        /// WASM frames that have a `wasm_byte_offset`.
+        ///
+        /// [spec]: https://sourcemaps.info/spec.html
+        pub fn init_source_map(json: &str) {
+            SOURCE_MAP.with(|cell| {
+                cell.get_or_init(|| SourceMap::new(json));
+            });
+        }
+
+        fn backfill_source_locations(frames: &mut [Frame]) {
+            SOURCE_MAP.with(|cell| {
+                let Some(Some(sm)) = cell.get() else { return };
+                for frame in frames.iter_mut() {
+                    let Some(offset) = frame.wasm_byte_offset else { continue };
+                    if let Some((file, line, col)) = sm.resolve(offset) {
+                        frame.filename = Some(file.to_string());
+                        frame.lineno = Some(line);
+                        frame.colno = Some(col);
+                    }
+                }
+            });
+        }
+    }
+}
+
 /// Capture the current JS call stack and parse it into structured frames.
 ///
 /// Creates a `new Error()` on the JS side, reads its `.stack` property,
@@ -80,5 +119,7 @@ pub fn capture() -> Vec<Frame> {
     let mut frames = Frame::parse(&stack);
     #[cfg(feature = "name-section")]
     backfill_names(&mut frames);
+    #[cfg(feature = "source-map")]
+    backfill_source_locations(&mut frames);
     frames
 }

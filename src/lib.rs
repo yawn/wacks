@@ -39,6 +39,9 @@ pub use frame::Frame;
 #[cfg(feature = "name-section")]
 mod namesec;
 
+#[cfg(feature = "source-map")]
+mod sourcemap;
+
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         mod capture;
@@ -46,6 +49,9 @@ cfg_if::cfg_if! {
         use std::panic::{set_hook, PanicHookInfo};
 
         pub use capture::capture;
+
+        #[cfg(feature = "source-map")]
+        pub use capture::init_source_map;
 
         /// Install a panic hook that passes structured frames to `callback`.
         ///
