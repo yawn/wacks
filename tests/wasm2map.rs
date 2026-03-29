@@ -50,6 +50,25 @@ fn deterministic_output() {
 }
 
 #[test]
+fn sources_are_relative_paths() {
+    let Some(wasm) = fixture_wasm() else { return };
+    let out = std::env::temp_dir().join("wacks-wasm2map-relative.map");
+
+    run_wasm2map(&wasm, &out);
+
+    let map: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+
+    for source in map["sources"].as_array().unwrap() {
+        let path = source.as_str().unwrap();
+        assert!(
+            !path.starts_with('/'),
+            "source map must not contain absolute paths: {path}",
+        );
+    }
+}
+
+#[test]
 fn rejects_wrong_arg_count() {
     let result = Command::new(env!("CARGO_BIN_EXE_wasm2map"))
         .output()

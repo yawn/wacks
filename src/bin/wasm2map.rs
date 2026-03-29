@@ -26,6 +26,35 @@ struct Entry {
 
 type Reader<'a> = EndianSlice<'a, LittleEndian>;
 
+/// Strip a DWARF source path to a leak-free relative form.
+///
+/// Priority: workspace-relative via `base_prefix`, then cargo registry
+/// (`…/.cargo/registry/src/<index>/<crate>/…` → `<crate>/…`), then rustc
+/// stdlib (`/rustc/<hash>/…` → `rustc/<hash>/…`). Falls back to stripping
+/// any leading `/`.
+fn make_relative(path: &str, base_prefix: &str) -> String {
+    if let Some(rest) = path.strip_prefix(base_prefix) {
+        return rest.to_string();
+    }
+
+    if let Some(idx) = path.find("/.cargo/registry/src/") {
+        let after = &path[idx + "/.cargo/registry/src/".len()..];
+        if let Some(slash) = after.find('/') {
+            return after[slash + 1..].to_string();
+        }
+    }
+
+    if let Some(idx) = path.find("/rust/deps/") {
+        return path[idx + 1..].to_string();
+    }
+
+    if let Some(idx) = path.find("/rustc/") {
+        return path[idx + 1..].to_string();
+    }
+
+    path.trim_start_matches('/').to_string()
+}
+
 impl<'a> DwarfReader<'a> {
     fn collect_entries(&self) -> Result<(Vec<String>, Vec<Entry>)> {
         let mut sources: Vec<String> = Vec::new();
@@ -154,15 +183,66 @@ impl<'a> DwarfReader<'a> {
         })
     }
 
+    /// Detect the workspace root from DWARF `comp_dir` entries.
+    ///
+    /// Returns the longest common directory prefix of all compilation
+    /// directories that belong to workspace crates (i.e. not rustc stdlib
+    /// or cargo registry dependencies).
+    fn detect_base(&self) -> Result<String> {
+        let mut base = String::new();
+        let mut units = self.dwarf.units();
+
+        while let Some(header) = units.next()? {
+            let unit = self.dwarf.unit(header)?;
+            let Some(ref comp_dir) = unit.comp_dir else { continue };
+            let dir = comp_dir.to_string_lossy().replace('\\', "/");
+            if !dir.starts_with('/')
+                || dir.starts_with("/rustc/")
+                || dir.starts_with("/rust/deps/")
+                || dir.contains("/.cargo/")
+            {
+                continue;
+            }
+
+            if base.is_empty() {
+                base = dir;
+            } else {
+                while !dir.starts_with(&base) {
+                    match base.rfind('/') {
+                        Some(i) => base.truncate(i),
+                        None => {
+                            base.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(base)
+    }
+
     /// Generate source map v3 JSON from DWARF line programs.
+    ///
+    /// Paths in `sources` are made relative to avoid leaking local filesystem
+    /// details (home directory, username). The workspace root is auto-detected
+    /// from DWARF compilation directories; cargo registry paths are trimmed to
+    /// `<crate>-<ver>/…`, rustc stdlib paths to `rustc/<hash>/…`.
     fn source_map(&self) -> Result<(serde_json::Value, usize)> {
+        let base = self.detect_base()?;
         let (sources, mut entries) = self.collect_entries()?;
 
         entries.sort_by_key(|e| e.addr);
 
         let mappings = Self::encode_vlq_mappings(&entries)?;
         let num_mappings = entries.len();
-        let sources: Vec<String> = sources.into_iter().map(|s| s.replace('\\', "/")).collect();
+        let prefix = format!("{base}/");
+
+        let sources: Vec<String> = sources
+            .into_iter()
+            .map(|s| s.replace('\\', "/"))
+            .map(|s| make_relative(&s, &prefix))
+            .collect();
 
         let map = json!({
             "version": 3,
@@ -173,7 +253,6 @@ impl<'a> DwarfReader<'a> {
 
         Ok((map, num_mappings))
     }
-
 }
 
 fn main() {
