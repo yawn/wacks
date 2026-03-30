@@ -13,12 +13,12 @@ description = "Build the WASM fixture for e2e tests"
 dir = "tests/e2e"
 run = """
 wasm-pack build fixture --target web --out-dir ../static/pkg
-cargo run --bin wasm2map --features source-map-gen --manifest-path ../../Cargo.toml --target "$(rustc -vV | awk '/^host:/ { print $2 }')" -- static/pkg/wacks_test_fixture_bg.wasm static/pkg/wacks_test_fixture_bg.wasm.map
+cargo run --bin sourcemap-gen --features sourcemap-gen --manifest-path ../../Cargo.toml --target "$(rustc -vV | awk '/^host:/ { print $2 }')" -- static/pkg/wacks_test_fixture_bg.wasm static/pkg/wacks_test_fixture_bg.wasm.map
 """
 
 [tasks."test:unit"]
 description = "Run unit tests on the native target"
-run = "cargo test --target $(rustc -vV | awk '/^host:/ { print $2 }')"
+run = "cargo nextest run --target $(rustc -vV | awk '/^host:/ { print $2 }')"
 
 [tasks."test:e2e"]
 description = "Run Playwright end-to-end tests across browsers"

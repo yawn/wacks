@@ -1,71 +1,91 @@
 //! E2E test fixture — triggers a known panic chain for cross-browser assertions.
 
-use std::panic::set_hook;
-
 use serde_json::to_string;
-use wacks::{capture, Frame};
+use wacks::Builder;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(inline_js = "
-export function capture_stack_string() { return new Error().stack || ''; }
-
-export function store_raw_frames(json) {
-    window.__raw_frames = JSON.parse(json);
-}
-
 export function store_captured_frames(json) {
     window.__captured_frames = JSON.parse(json);
 }
 ")]
 extern "C" {
-    fn capture_stack_string() -> String;
-    fn store_raw_frames(json: &str);
     fn store_captured_frames(json: &str);
 }
 
-#[wasm_bindgen(start)]
-pub fn init() {
-    set_hook(Box::new(|_info| {
-        // Raw parse only — no name section backfill
-        let raw = Frame::parse(&capture_stack_string());
-        if let Ok(json) = to_string(&raw) {
-            store_raw_frames(&json);
-        }
-
-        // Full capture — parse + name section backfill
-        let captured = capture();
-        if let Ok(json) = to_string(&captured) {
+#[wasm_bindgen]
+pub fn install_hook() {
+    Builder::new().install(|frames, _info| {
+        if let Ok(json) = to_string(&frames) {
             store_captured_frames(&json);
         }
-    }));
-}
-
-#[inline(never)]
-fn level_1() {
-    level_2();
-}
-
-#[inline(never)]
-fn level_2() {
-    level_3();
-}
-
-#[inline(never)]
-fn level_3() {
-    panic!("test panic");
+    });
 }
 
 #[wasm_bindgen]
-pub fn setup_source_map(json: &str) {
-    wacks::init_source_map(json);
+pub fn install_hook_with_sourcemap(filename: &str) {
+    Builder::new()
+        .sourcemap(filename)
+        .install(|frames, _info| {
+            if let Ok(json) = to_string(&frames) {
+                store_captured_frames(&json);
+            }
+        });
 }
 
-#[wasm_bindgen]
-pub fn setup_source_map_proxy(filename: &str) {
-    wacks::init_source_map_proxy(filename);
+mod pipeline {
+    #[inline(never)]
+    pub fn ingest(data: &[u8]) {
+        validate(data);
+    }
+
+    #[inline(never)]
+    fn validate(data: &[u8]) {
+        decode(data);
+    }
+
+    #[inline(never)]
+    fn decode(data: &[u8]) {
+        transform(data);
+    }
+
+    #[inline(never)]
+    fn transform(data: &[u8]) {
+        normalize(data);
+    }
+
+    #[inline(never)]
+    fn normalize(data: &[u8]) {
+        enrich(data);
+    }
+
+    #[inline(never)]
+    fn enrich(data: &[u8]) {
+        compress(data);
+    }
+
+    #[inline(never)]
+    fn compress(data: &[u8]) {
+        encrypt(data);
+    }
+
+    #[inline(never)]
+    fn encrypt(data: &[u8]) {
+        flush(data);
+    }
+
+    #[inline(never)]
+    fn flush(data: &[u8]) {
+        commit(data);
+    }
+
+    #[inline(never)]
+    fn commit(_data: &[u8]) {
+        panic!("pipeline commit failed");
+    }
 }
 
 #[wasm_bindgen]
 pub fn trigger_panic() {
-    level_1();
+    pipeline::ingest(b"test payload");
 }

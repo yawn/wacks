@@ -1,9 +1,67 @@
-//! `Error.stack` string parsing into structured frames.
+//! `Error.stack` parsing: format detection, V8/SpiderMonkey line parsing,
+//! and WASM/JS location extraction.
 
-use crate::format::StackFormat;
+use std::borrow::Cow;
+
 use crate::Frame;
+use crate::demangle::demangle_symbol;
+
+/// Parsed JS source location (`filename:line:col`).
+struct JsLocation {
+    colno: Option<u32>,
+    filename: Option<String>,
+    lineno: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StackFormat {
+    SpiderMonkey,
+    Unknown,
+    V8,
+}
+
+/// Parsed WASM location (`wasm-function[index]:0xoffset`).
+struct WasmLocation {
+    byte_offset: Option<u64>,
+    function_index: Option<u32>,
+}
 
 impl Frame {
+    /// Build a [`Frame`] from a raw function name and location string.
+    fn build(raw_name: Option<&str>, location: &str) -> Self {
+        let raw_name = raw_name.map(strip_wasm_module_prefix);
+        let wasm = WasmLocation::parse(location);
+
+        let raw_name = match (raw_name, wasm.function_index) {
+            (Some(name), Some(idx)) if name.parse::<u32>().ok() == Some(idx) => None,
+            (name, _) => name,
+        };
+
+        let js = if wasm.function_index.is_none() {
+            JsLocation::parse(location)
+        } else {
+            JsLocation {
+                colno: None,
+                filename: None,
+                lineno: None,
+            }
+        };
+
+        let demangled = raw_name.map(demangle_symbol);
+        let in_app = demangled.as_deref().map(is_in_app).unwrap_or(true);
+
+        Self {
+            function: demangled.map(Cow::into_owned),
+            raw_function: raw_name.map(str::to_string),
+            filename: js.filename,
+            lineno: js.lineno,
+            colno: js.colno,
+            wasm_function_index: wasm.function_index,
+            wasm_byte_offset: wasm.byte_offset,
+            in_app,
+        }
+    }
+
     /// Parse an `Error.stack` string into structured [`Frame`]s.
     ///
     /// Supports Chrome/V8 and Firefox/SpiderMonkey stack formats.
@@ -21,15 +79,203 @@ impl Frame {
     }
 }
 
+impl JsLocation {
+    /// Parse `filename:line:col` from a JS location string.
+    ///
+    /// Parses from the right to avoid tripping on colons in URLs
+    /// (e.g. `http://localhost:3030/index.js:187:13`).
+    fn parse(location: &str) -> Self {
+        if let Some((rest, col_str)) = location.rsplit_once(':')
+            && let Ok(col) = col_str.parse::<u32>()
+        {
+            if let Some((url, line_str)) = rest.rsplit_once(':')
+                && let Ok(line) = line_str.parse::<u32>()
+            {
+                return Self {
+                    colno: Some(col),
+                    filename: Some(url.to_string()),
+                    lineno: Some(line),
+                };
+            }
+            return Self {
+                colno: None,
+                filename: Some(rest.to_string()),
+                lineno: Some(col),
+            };
+        }
+
+        if location.is_empty() {
+            Self {
+                colno: None,
+                filename: None,
+                lineno: None,
+            }
+        } else {
+            Self {
+                colno: None,
+                filename: Some(location.to_string()),
+                lineno: None,
+            }
+        }
+    }
+}
+
+impl StackFormat {
+    /// Detect the stack format from the first meaningful line.
+    fn detect(stack: &str) -> Self {
+        for line in stack.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("Error") {
+                continue;
+            }
+            if trimmed.starts_with("at ") {
+                return Self::V8;
+            }
+            if trimmed.contains('@') {
+                return Self::SpiderMonkey;
+            }
+        }
+        Self::Unknown
+    }
+
+    /// Parse a single stack line into a [`Frame`], if possible.
+    fn parse_line(self, line: &str) -> Option<Frame> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("Error") {
+            return None;
+        }
+        match self {
+            Self::V8 => Self::parse_v8(trimmed),
+            Self::SpiderMonkey => Self::parse_spidermonkey(trimmed),
+            Self::Unknown => None,
+        }
+    }
+
+    /// ```text
+    /// <function>@<url>:wasm-function[<idx>]:0x<offset>
+    /// @<url>:line:col              → anonymous
+    /// ```
+    fn parse_spidermonkey(line: &str) -> Option<Frame> {
+        let at_pos = line.find('@')?;
+        let raw_name = &line[..at_pos];
+        let location = &line[at_pos + 1..];
+
+        if location == "[native code]" {
+            return None;
+        }
+
+        let name = (!raw_name.is_empty()).then_some(raw_name);
+
+        Some(Frame::build(name, location))
+    }
+
+    /// ```text
+    /// at <function> (<location>)     → named frame
+    /// at <location>                  → anonymous frame
+    /// ```
+    fn parse_v8(line: &str) -> Option<Frame> {
+        let rest = line.strip_prefix("at ")?;
+
+        let (raw_name, location) = if rest.ends_with(')') {
+            let paren_open = rest.rfind(" (")?;
+            let name = &rest[..paren_open];
+            let loc = &rest[paren_open + 2..rest.len() - 1];
+            (Some(name), loc)
+        } else {
+            (None, rest)
+        };
+
+        Some(Frame::build(raw_name, location))
+    }
+}
+
+impl WasmLocation {
+    /// Parse `wasm-function[index]` and `0xoffset` from a location string.
+    ///
+    /// Works on V8 (`wasm://wasm/<hash>:wasm-function[N]:0xOFF`),
+    /// SpiderMonkey (`http://…/app.wasm:wasm-function[N]:0xOFF`), and
+    /// WebKit (`wasm-function[N]`) locations.
+    fn parse(location: &str) -> Self {
+        let after_marker = if let Some(pos) = location.find(":wasm-function[") {
+            &location[pos + ":wasm-function[".len()..]
+        } else if let Some(stripped) = location.strip_prefix("wasm-function[") {
+            stripped
+        } else {
+            return Self {
+                byte_offset: None,
+                function_index: None,
+            };
+        };
+
+        let Some(bracket_end) = after_marker.find(']') else {
+            return Self {
+                byte_offset: None,
+                function_index: None,
+            };
+        };
+
+        let Ok(fn_index) = after_marker[..bracket_end].parse::<u32>() else {
+            return Self {
+                byte_offset: None,
+                function_index: None,
+            };
+        };
+
+        let byte_offset = after_marker[bracket_end + 1..]
+            .strip_prefix(":0x")
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok());
+
+        Self {
+            byte_offset,
+            function_index: Some(fn_index),
+        }
+    }
+}
+
+/// Heuristic: returns `false` for standard library, wasm-bindgen glue,
+/// and panic infrastructure frames.
+pub(crate) fn is_in_app(function: &str) -> bool {
+    const NOT_IN_APP_PREFIXES: &[&str] = &[
+        "std::",
+        "core::",
+        "alloc::",
+        "wasm_bindgen::",
+        "console_error_panic_hook::",
+        "<alloc::",
+        "<core::",
+        "<std::",
+    ];
+    const NOT_IN_APP_CONTAINS: &[&str] = &[
+        "__wbg_",
+        "__wbindgen_",
+        "__rust_start_panic",
+        "rust_begin_unwind",
+        "rust_panic",
+    ];
+
+    !NOT_IN_APP_PREFIXES.iter().any(|p| function.starts_with(p))
+        && !NOT_IN_APP_CONTAINS.iter().any(|n| function.contains(n))
+}
+
+/// Strip browser-added WASM module name prefix.
+///
+/// V8 and SpiderMonkey prefix WASM function names with the module name:
+/// `module.wasm.crate::func::hash` → `crate::func::hash`
+fn strip_wasm_module_prefix(name: &str) -> &str {
+    match name.find(".wasm.") {
+        Some(pos) => &name[pos + 6..],
+        None => name,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::format::{is_in_app, JsLocation, StackFormat, WasmLocation};
+    use super::{JsLocation, StackFormat, WasmLocation, is_in_app};
     use crate::Frame;
 
     #[test]
     fn detect_spidermonkey_format() {
-        let stack =
-            "my_crate::func::h123abc@http://localhost/app.wasm:wasm-function[1]:0x100\n";
+        let stack = "my_crate::func::h123abc@http://localhost/app.wasm:wasm-function[1]:0x100\n";
         assert_eq!(StackFormat::detect(stack), StackFormat::SpiderMonkey);
     }
 
@@ -45,7 +291,8 @@ mod tests {
 
     #[test]
     fn detect_v8_format() {
-        let stack = "Error\n    at my_crate::func::h123abc (wasm://wasm/abc:wasm-function[1]:0x100)\n";
+        let stack =
+            "Error\n    at my_crate::func::h123abc (wasm://wasm/abc:wasm-function[1]:0x100)\n";
         assert_eq!(StackFormat::detect(stack), StackFormat::V8);
     }
 
@@ -101,7 +348,10 @@ mod tests {
             wasm_byte_offset: Some(0x9065),
             in_app: true,
         };
-        assert_eq!(f.to_string(), "my_crate::handler at wasm-function[58]:0x9065");
+        assert_eq!(
+            f.to_string(),
+            "my_crate::handler at wasm-function[58]:0x9065"
+        );
     }
 
     #[test]
@@ -113,7 +363,10 @@ mod tests {
     #[test]
     fn js_location_full() {
         let loc = JsLocation::parse("http://localhost:3030/index.js:187:13");
-        assert_eq!(loc.filename.as_deref(), Some("http://localhost:3030/index.js"));
+        assert_eq!(
+            loc.filename.as_deref(),
+            Some("http://localhost:3030/index.js")
+        );
         assert_eq!(loc.lineno, Some(187));
         assert_eq!(loc.colno, Some(13));
     }
@@ -121,7 +374,10 @@ mod tests {
     #[test]
     fn js_location_line_only() {
         let loc = JsLocation::parse("http://localhost:3030/index.js:42");
-        assert_eq!(loc.filename.as_deref(), Some("http://localhost:3030/index.js"));
+        assert_eq!(
+            loc.filename.as_deref(),
+            Some("http://localhost:3030/index.js")
+        );
         assert_eq!(loc.lineno, Some(42));
         assert_eq!(loc.colno, None);
     }
@@ -148,7 +404,10 @@ Error
         assert_eq!(frames.len(), 5);
 
         assert!(!frames[0].in_app);
-        assert_eq!(frames[0].function.as_deref(), Some("std::panicking::begin_panic"));
+        assert_eq!(
+            frames[0].function.as_deref(),
+            Some("std::panicking::begin_panic")
+        );
         assert!(frames[1].in_app);
         assert!(frames[2].in_app);
         assert!(frames[3].in_app);
@@ -160,7 +419,9 @@ Error
     #[test]
     fn not_in_app_generic_std_impls() {
         assert!(!is_in_app("<core::fmt::Arguments>::new_v1"));
-        assert!(!is_in_app("<alloc::string::String as core::fmt::Display>::fmt"));
+        assert!(!is_in_app(
+            "<alloc::string::String as core::fmt::Display>::fmt"
+        ));
     }
 
     #[test]
@@ -202,7 +463,10 @@ Error
         assert_eq!(frames.len(), 1);
         let f = &frames[0];
         assert!(!f.in_app);
-        assert_eq!(f.filename.as_deref(), Some("http://localhost:3030/index.js"));
+        assert_eq!(
+            f.filename.as_deref(),
+            Some("http://localhost:3030/index.js")
+        );
         assert_eq!(f.lineno, Some(42));
         assert_eq!(f.colno, Some(10));
     }
@@ -212,7 +476,10 @@ Error
         let stack = "my_module.wasm.core::panicking::panic_fmt::hb8badb9a@http://localhost:3030/app.wasm:wasm-function[130]:0x1000\n";
         let frames = Frame::parse(stack);
         assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0].function.as_deref(), Some("core::panicking::panic_fmt"));
+        assert_eq!(
+            frames[0].function.as_deref(),
+            Some("core::panicking::panic_fmt")
+        );
         assert!(!frames[0].in_app);
     }
 
@@ -230,8 +497,7 @@ my_crate::handler::h86f485cc@http://localhost:3030/index_bg.wasm:wasm-function[5
 
     #[test]
     fn parse_spidermonkey_wasm_frame() {
-        let stack =
-            "my_crate::handler::h86f485cc@http://localhost:3030/index_bg.wasm:wasm-function[58]:0x9065\n";
+        let stack = "my_crate::handler::h86f485cc@http://localhost:3030/index_bg.wasm:wasm-function[58]:0x9065\n";
         let frames = Frame::parse(stack);
         assert_eq!(frames.len(), 1);
         let f = &frames[0];
@@ -285,8 +551,14 @@ Error
 ";
         let frames = Frame::parse(stack);
         assert_eq!(frames.len(), 2);
-        assert_eq!(frames[0].function.as_deref(), Some("std::panicking::panic_with_hook"));
-        assert_eq!(frames[0].raw_function.as_deref(), Some("std::panicking::panic_with_hook::hab12cd"));
+        assert_eq!(
+            frames[0].function.as_deref(),
+            Some("std::panicking::panic_with_hook")
+        );
+        assert_eq!(
+            frames[0].raw_function.as_deref(),
+            Some("std::panicking::panic_with_hook::hab12cd")
+        );
         assert!(!frames[0].in_app);
         assert_eq!(frames[1].function.as_deref(), Some("my_crate::handler"));
         assert!(frames[1].in_app);

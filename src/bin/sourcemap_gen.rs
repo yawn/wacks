@@ -19,15 +19,16 @@ fn main() -> Result<()> {
     let cli = Args::parse();
 
     let data = fs::read(&cli.input).context(format!("opening {}", cli.input.display()))?;
-    let (map, num_mappings) = wacks::sourcemap_gen::generate(&data)?;
+    let map = wacks::sourcemap_gen::generate(&data)?;
 
-    let sources_len = map["sources"].as_array().map(|a| a.len()).unwrap_or(0);
+    let sources_len = map.json["sources"].as_array().map(|a| a.len()).unwrap_or(0);
 
-    fs::write(&cli.output, serde_json::to_string(&map)?).context("writing output")?;
+    fs::write(&cli.output, serde_json::to_string(&map.json)?).context("writing output")?;
 
     eprintln!(
-        "wasm2map: {sources_len} sources, {num_mappings} mappings → {}",
-        cli.output.display()
+        "sourcemap-gen: {sources_len} sources, {} mappings → {}",
+        map.num_mappings,
+        cli.output.display(),
     );
 
     Ok(())

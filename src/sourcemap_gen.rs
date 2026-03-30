@@ -5,7 +5,7 @@
 //!
 //! ```rust,ignore
 //! let wasm = std::fs::read("app.wasm")?;
-//! let (map, num_mappings) = wacks::sourcemap_gen::generate(&wasm)?;
+//! let map = wacks::sourcemap_gen::generate(&wasm)?;
 //! ```
 
 use std::collections::BTreeMap;
@@ -31,35 +31,13 @@ struct Entry {
 
 type Reader<'a> = EndianSlice<'a, LittleEndian>;
 
-/// Strip a DWARF source path to a PII-free relative form.
-///
-/// Strips `$HOME/` if it matches, otherwise strips the leading `/`.
-fn make_relative(path: &str, home_prefix: &str) -> String {
-    if !home_prefix.is_empty() {
-        if let Some(rest) = path.strip_prefix(home_prefix) {
-            return rest.to_string();
-        }
-    }
-    path.strip_prefix('/').unwrap_or(path).to_string()
+/// Generated source map v3 with metadata.
+pub struct SourceMap {
+    pub json: serde_json::Value,
+    pub num_mappings: usize,
 }
 
 impl<'a> DwarfReader<'a> {
-    fn new(obj: &'a File<'a>, code_section_offset: u64) -> Result<Self> {
-        let dwarf = Dwarf::load(|id| {
-            let data = obj
-                .section_by_name(id.name())
-                .and_then(|s| s.data().ok())
-                .unwrap_or_default();
-            Ok::<_, gimli::Error>(Reader::new(data, LittleEndian))
-        })
-        .context("loading DWARF sections")?;
-
-        Ok(Self {
-            code_section_offset,
-            dwarf,
-        })
-    }
-
     /// Collect DWARF line entries, returning display paths, absolute paths
     /// (for reading source content), and mapping entries.
     fn collect_entries(&self) -> Result<(Vec<String>, Vec<String>, Vec<Entry>)> {
@@ -182,15 +160,29 @@ impl<'a> DwarfReader<'a> {
 
         Err(anyhow!("WASM code section not found"))
     }
+
+    fn new(obj: &'a File<'a>, code_section_offset: u64) -> Result<Self> {
+        let dwarf = Dwarf::load(|id| {
+            let data = obj
+                .section_by_name(id.name())
+                .and_then(|s| s.data().ok())
+                .unwrap_or_default();
+            Ok::<_, gimli::Error>(Reader::new(data, LittleEndian))
+        })
+        .context("loading DWARF sections")?;
+
+        Ok(Self {
+            code_section_offset,
+            dwarf,
+        })
+    }
 }
 
-/// Generate a source map v3 JSON value from a WASM binary with DWARF debug info.
+/// Generate a source map v3 from a WASM binary with DWARF debug info.
 ///
 /// Source paths are made relative by stripping `$HOME/` (or just the
 /// leading `/`) to avoid leaking PII like usernames or home directories.
-///
-/// Returns the JSON value and the number of mappings emitted.
-pub fn generate(wasm: &[u8]) -> Result<(serde_json::Value, usize)> {
+pub fn generate(wasm: &[u8]) -> Result<SourceMap> {
     let code_offset = DwarfReader::find_code_section_offset(wasm)?;
     let obj = File::parse(wasm).context("parsing wasm object")?;
     let reader = DwarfReader::new(&obj, code_offset)?;
@@ -221,7 +213,7 @@ pub fn generate(wasm: &[u8]) -> Result<(serde_json::Value, usize)> {
         .map(|s| make_relative(&s, &home_prefix))
         .collect();
 
-    let map = json!({
+    let json = json!({
         "version": 3,
         "sources": sources,
         "sourcesContent": sources_content,
@@ -229,7 +221,19 @@ pub fn generate(wasm: &[u8]) -> Result<(serde_json::Value, usize)> {
         "mappings": mappings,
     });
 
-    Ok((map, num_mappings))
+    Ok(SourceMap { json, num_mappings })
+}
+
+/// Strip a DWARF source path to a PII-free relative form.
+///
+/// Strips `$HOME/` if it matches, otherwise strips the leading `/`.
+fn make_relative(path: &str, home_prefix: &str) -> String {
+    if !home_prefix.is_empty()
+        && let Some(rest) = path.strip_prefix(home_prefix)
+    {
+        return rest.to_string();
+    }
+    path.strip_prefix('/').unwrap_or(path).to_string()
 }
 
 #[cfg(test)]
@@ -237,33 +241,6 @@ mod tests {
     use super::*;
 
     const HOME: &str = "/home/user/";
-
-    #[test]
-    fn strips_home_prefix() {
-        assert_eq!(
-            make_relative("/home/user/project/src/main.rs", HOME),
-            "project/src/main.rs",
-        );
-        assert_eq!(
-            make_relative(
-                "/home/user/.cargo/registry/src/idx/serde-1.0/src/lib.rs",
-                HOME
-            ),
-            ".cargo/registry/src/idx/serde-1.0/src/lib.rs",
-        );
-    }
-
-    #[test]
-    fn strips_leading_slash_when_not_under_home() {
-        assert_eq!(
-            make_relative("/rustc/abc123/library/core/src/ptr.rs", HOME),
-            "rustc/abc123/library/core/src/ptr.rs",
-        );
-        assert_eq!(
-            make_relative("/rust/deps/dlmalloc-0.2.11/src/lib.rs", HOME),
-            "rust/deps/dlmalloc-0.2.11/src/lib.rs",
-        );
-    }
 
     #[test]
     fn already_relative_unchanged() {
@@ -291,5 +268,32 @@ mod tests {
                 "home directory leaked in: {result} (from {path})",
             );
         }
+    }
+
+    #[test]
+    fn strips_home_prefix() {
+        assert_eq!(
+            make_relative("/home/user/project/src/main.rs", HOME),
+            "project/src/main.rs",
+        );
+        assert_eq!(
+            make_relative(
+                "/home/user/.cargo/registry/src/idx/serde-1.0/src/lib.rs",
+                HOME
+            ),
+            ".cargo/registry/src/idx/serde-1.0/src/lib.rs",
+        );
+    }
+
+    #[test]
+    fn strips_leading_slash_when_not_under_home() {
+        assert_eq!(
+            make_relative("/rustc/abc123/library/core/src/ptr.rs", HOME),
+            "rustc/abc123/library/core/src/ptr.rs",
+        );
+        assert_eq!(
+            make_relative("/rust/deps/dlmalloc-0.2.11/src/lib.rs", HOME),
+            "rust/deps/dlmalloc-0.2.11/src/lib.rs",
+        );
     }
 }

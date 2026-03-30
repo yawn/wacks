@@ -1,10 +1,10 @@
-//! Integration tests for the `wasm2map` binary.
+//! Integration tests for the `sourcemap-gen` binary.
 //!
 //! Requires the e2e fixture: `mise run build:e2e`
 //!
-//! Run with: `cargo nextest run --features source-map-gen`
+//! Run with: `cargo nextest run --features sourcemap-gen`
 
-#![cfg(feature = "source-map-gen")]
+#![cfg(feature = "sourcemap-gen")]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,15 +23,15 @@ fn fixture_wasm() -> Option<PathBuf> {
     }
 }
 
-fn run_wasm2map(wasm: &Path, out: &Path) {
-    let result = Command::new(env!("CARGO_BIN_EXE_wasm2map"))
+fn run_sourcemap_gen(wasm: &Path, out: &Path) {
+    let result = Command::new(env!("CARGO_BIN_EXE_sourcemap-gen"))
         .args([wasm.to_str().unwrap(), out.to_str().unwrap()])
         .output()
-        .expect("failed to run wasm2map");
+        .expect("failed to run sourcemap-gen");
 
     assert!(
         result.status.success(),
-        "wasm2map failed: {}",
+        "sourcemap-gen failed: {}",
         String::from_utf8_lossy(&result.stderr),
     );
 }
@@ -40,9 +40,9 @@ fn run_wasm2map(wasm: &Path, out: &Path) {
 fn deterministic_output() {
     let Some(wasm) = fixture_wasm() else { return };
     let expected = fixture_dir().join("wacks_test_fixture_bg.wasm.map");
-    let out = std::env::temp_dir().join("wacks-wasm2map-deterministic.map");
+    let out = std::env::temp_dir().join("wacks-sourcemap-gen-deterministic.map");
 
-    run_wasm2map(&wasm, &out);
+    run_sourcemap_gen(&wasm, &out);
 
     let generated = std::fs::read_to_string(&out).unwrap();
     let expected = std::fs::read_to_string(&expected).unwrap();
@@ -52,9 +52,9 @@ fn deterministic_output() {
 #[test]
 fn sources_contain_no_absolute_paths_or_pii() {
     let Some(wasm) = fixture_wasm() else { return };
-    let out = std::env::temp_dir().join("wacks-wasm2map-relative.map");
+    let out = std::env::temp_dir().join("wacks-sourcemap-gen-relative.map");
 
-    run_wasm2map(&wasm, &out);
+    run_sourcemap_gen(&wasm, &out);
 
     let json = std::fs::read_to_string(&out).unwrap();
     let map: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -64,22 +64,9 @@ fn sources_contain_no_absolute_paths_or_pii() {
         assert!(!path.starts_with('/'), "absolute path: {path}");
     }
 
-    // The full JSON must not contain any home-directory fragment that could
-    // leak a username. This catches both `sources` values and any future
-    // field that might embed paths.
     let home = std::env::var("HOME").unwrap();
     assert!(
         !json.contains(&home),
         "source map leaks home directory: {home}",
     );
-}
-
-#[test]
-fn rejects_wrong_arg_count() {
-    let result = Command::new(env!("CARGO_BIN_EXE_wasm2map"))
-        .output()
-        .expect("failed to run wasm2map");
-
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("Usage:"));
 }

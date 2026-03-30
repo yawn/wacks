@@ -44,7 +44,8 @@ impl fmt::Display for Frame {
                     write!(f, ":{col}")?;
                 }
             }
-        } else if let (Some(idx), Some(offset)) = (self.wasm_function_index, self.wasm_byte_offset) {
+        } else if let (Some(idx), Some(offset)) = (self.wasm_function_index, self.wasm_byte_offset)
+        {
             write!(f, " at wasm-function[{idx}]:0x{offset:x}")?;
         }
         Ok(())

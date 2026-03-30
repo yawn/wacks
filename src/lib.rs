@@ -8,12 +8,11 @@
 //! # Quick start
 //!
 //! ```rust,ignore
-//! use wacks::{capture, Frame};
-//!
-//! std::panic::set_hook(Box::new(|info| {
-//!     let frames: Vec<Frame> = capture();
-//!     // forward to your error reporter …
-//! }));
+//! wacks::Builder::new()
+//!     .sourcemap("app.wasm.js")
+//!     .install(|frames, info| {
+//!         // forward to your error reporter …
+//!     });
 //! ```
 //!
 //! # Parsing existing stack strings
@@ -30,45 +29,22 @@
 //! ```
 
 mod demangle;
-mod format;
 mod frame;
 mod parse;
 
 pub use frame::Frame;
 
-#[cfg(feature = "name-section")]
-mod namesec;
-
-#[cfg(feature = "source-map")]
-mod sourcemap;
-
-#[cfg(feature = "source-map-gen")]
+#[cfg(feature = "sourcemap-gen")]
 pub mod sourcemap_gen;
 
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
-        mod capture;
+        mod builder;
+        mod namesec;
+        mod sourcemap;
 
-        use std::panic::{set_hook, PanicHookInfo};
-
-        pub use capture::capture;
-
-        #[cfg(feature = "source-map")]
-        pub use capture::init_source_map;
-
-        #[cfg(feature = "source-map-proxy")]
-        pub use capture::init_source_map_proxy;
-
-        /// Install a panic hook that passes structured frames to `callback`.
-        ///
-        /// This is a convenience wrapper around [`std::panic::set_hook`] +
-        /// [`capture`]. For more control, call [`capture`] directly inside
-        /// your own hook.
-        pub fn set_panic_hook(callback: fn(Vec<Frame>, &PanicHookInfo<'_>)) {
-            set_hook(Box::new(move |info| {
-                let frames = capture::capture();
-                callback(frames, info);
-            }));
-        }
+        pub use builder::Builder;
+    } else if #[cfg(test)] {
+        mod namesec;
     }
 }
