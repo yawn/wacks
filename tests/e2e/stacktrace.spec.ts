@@ -85,7 +85,7 @@ test.describe("source map", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("http://localhost:3333");
     await page.waitForFunction(() => (window as any).__wasm_ready === true);
-    await page.evaluate(() => (window as any).install_hook_with_sourcemap("app.wasm.js"));
+    await page.evaluate(() => (window as any).install_hook_with_sourcemap_and_framemap("app.wasm.js"));
     await page.evaluate(() => (window as any).triggerPanic());
     frames = await page.evaluate(() => (window as any).__captured_frames);
   });
@@ -109,8 +109,6 @@ test.describe("source map", () => {
   test("resolved source lines match embedded content", async ({
     browserName,
   }) => {
-    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
-
     const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
     const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
     const consumer = new SourceMapConsumer(mapJson);

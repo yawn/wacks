@@ -13,24 +13,30 @@ extern "C" {
     fn store_captured_frames(json: &str);
 }
 
+fn on_panic(frames: Vec<wacks::Frame>, _info: &std::panic::PanicHookInfo<'_>) {
+    if let Ok(json) = to_string(&frames) {
+        store_captured_frames(&json);
+    }
+}
+
 #[wasm_bindgen]
 pub fn install_hook() {
-    Builder::new().install(|frames, _info| {
-        if let Ok(json) = to_string(&frames) {
-            store_captured_frames(&json);
-        }
-    });
+    Builder::new().install(on_panic);
 }
 
 #[wasm_bindgen]
 pub fn install_hook_with_sourcemap(filename: &str) {
     Builder::new()
         .sourcemap(filename)
-        .install(|frames, _info| {
-            if let Ok(json) = to_string(&frames) {
-                store_captured_frames(&json);
-            }
-        });
+        .install(on_panic);
+}
+
+#[wasm_bindgen]
+pub fn install_hook_with_sourcemap_and_framemap(filename: &str, framemap: &[u8]) {
+    Builder::new()
+        .sourcemap(filename)
+        .framemap(framemap)
+        .install(on_panic);
 }
 
 mod pipeline {

@@ -13,6 +13,7 @@ Function names are always resolved from the WASM binary's [name section](https:/
 ```rust
 wacks::Builder::new()
     .sourcemap("app.wasm.js")
+    .framemap(&framemap_bytes)
     .install(|frames, info| {
         // frames: Vec<Frame>, info: &PanicHookInfo
     });
@@ -50,7 +51,7 @@ wasm-bindgen --keep-debug --target web ...
 |----------|--------|
 | Chrome   | Full frames with demangled function names + WASM byte offsets |
 | Firefox  | Full frames with demangled function names + WASM byte offsets |
-| Safari   | Full frames with demangled function names (no byte offsets) |
+| Safari   | Full frames with demangled function names + byte offsets via framemap |
 
 ## Source map support
 
@@ -67,8 +68,33 @@ sourcemap-gen input.wasm output.wasm.map
 
 This requires `debug = "line-tables-only"` (or higher) in your release profile. Upload the generated `.map` file to your error reporting service.
 
+## Framemap support (WebKit byte offset resolution)
+
+Safari/WebKit only provides function indices in `Error.stack`, not byte offsets. The framemap bridges this gap by building a call-site index at build time — mapping `(caller, callee)` function pairs to the exact byte offset of each `call` instruction.
+
+At runtime, `wacks` walks adjacent frame pairs in the stack trace to resolve exact byte offsets, giving WebKit the same source map resolution precision as Chrome and Firefox.
+
+### Generating framemaps (`framemap-gen`)
+
+```sh
+cargo install wacks --features framemap-gen
+framemap-gen input.wasm output.framemap
+```
+
+### Loading at runtime
+
+The caller fetches the `.framemap` file and passes the raw bytes to `Builder::framemap`:
+
+```javascript
+const framemap = new Uint8Array(await (await fetch("app.framemap")).arrayBuffer());
+// pass to your wasm_bindgen init function that calls Builder::framemap(&bytes)
+```
+
+When a `(caller, callee)` pair has a unique call site, resolution is exact. For the rare ambiguous case (same function called multiple times from the same caller), the first call site is used as a best-effort fallback.
+
 ## Features
 
+- `framemap-gen` — builds the `framemap-gen` binary for generating framemaps from WASM bytecode
 - `sourcemap-gen` — builds the `sourcemap-gen` binary for generating source maps from DWARF debug info
 - `serde` — derives `Serialize` / `Deserialize` on `Frame`
 

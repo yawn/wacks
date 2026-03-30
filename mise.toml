@@ -15,6 +15,7 @@ dir = "tests/e2e"
 run = """
 wasm-pack build fixture --target web --out-dir ../static/pkg
 cargo run --bin sourcemap-gen --features sourcemap-gen --manifest-path ../../Cargo.toml --target "$(rustc -vV | awk '/^host:/ { print $2 }')" -- static/pkg/wacks_test_fixture_bg.wasm static/pkg/wacks_test_fixture_bg.wasm.map
+cargo run --bin framemap-gen --features framemap-gen --manifest-path ../../Cargo.toml --target "$(rustc -vV | awk '/^host:/ { print $2 }')" -- static/pkg/wacks_test_fixture_bg.wasm static/pkg/wacks_test_fixture_bg.framemap
 """
 
 [tasks."test:unit"]

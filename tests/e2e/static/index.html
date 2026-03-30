@@ -3,7 +3,7 @@
 <head><title>wacks e2e</title></head>
 <body>
 <script type="module">
-  import init, { install_hook, install_hook_with_sourcemap, trigger_panic } from './pkg/wacks_test_fixture.js';
+  import init, { install_hook, install_hook_with_sourcemap, install_hook_with_sourcemap_and_framemap, trigger_panic } from './pkg/wacks_test_fixture.js';
 
   // V8 limits Error.stack to 10 frames by default
   Error.stackTraceLimit = 50;
@@ -12,6 +12,11 @@
 
   window.install_hook = install_hook;
   window.install_hook_with_sourcemap = install_hook_with_sourcemap;
+  window.install_hook_with_sourcemap_and_framemap = async (filename) => {
+    const resp = await fetch('./pkg/wacks_test_fixture_bg.framemap');
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    install_hook_with_sourcemap_and_framemap(filename, bytes);
+  };
   window.triggerPanic = () => {
     try {
       trigger_panic();
