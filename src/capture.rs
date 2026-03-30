@@ -107,6 +107,44 @@ cfg_if::cfg_if! {
     }
 }
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "source-map-proxy")] {
+        use std::cell::OnceCell as ProxyCell;
+
+        thread_local! {
+            static PROXY_FILENAME: ProxyCell<String> = const { ProxyCell::new() };
+        }
+
+        /// Configure JS-compatible frame rewriting for server-side source map
+        /// resolution.
+        ///
+        /// WASM frames captured by [`capture`] will have their location set to
+        /// `<filename>:1:<byte_offset>`, allowing JS-only source map consumers
+        /// (PostHog, Datadog, etc.) to resolve them against an uploaded WASM
+        /// source map.
+        ///
+        /// `filename` should match the artifact name used when uploading the
+        /// source map (e.g. `"app.wasm.js"`).
+        pub fn init_source_map_proxy(filename: &str) {
+            PROXY_FILENAME.with(|cell| {
+                cell.get_or_init(|| filename.to_string());
+            });
+        }
+
+        fn rewrite_for_proxy(frames: &mut [Frame]) {
+            PROXY_FILENAME.with(|cell| {
+                let Some(filename) = cell.get() else { return };
+                for frame in frames.iter_mut() {
+                    let Some(offset) = frame.wasm_byte_offset else { continue };
+                    frame.filename = Some(filename.clone());
+                    frame.lineno = Some(1);
+                    frame.colno = u32::try_from(offset).ok();
+                }
+            });
+        }
+    }
+}
+
 /// Capture the current JS call stack and parse it into structured frames.
 ///
 /// Creates a `new Error()` on the JS side, reads its `.stack` property,
@@ -121,5 +159,7 @@ pub fn capture() -> Vec<Frame> {
     backfill_names(&mut frames);
     #[cfg(feature = "source-map")]
     backfill_source_locations(&mut frames);
+    #[cfg(feature = "source-map-proxy")]
+    rewrite_for_proxy(&mut frames);
     frames
 }

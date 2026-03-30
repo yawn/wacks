@@ -1,4 +1,7 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { test, expect } from "@playwright/test";
+import { SourceMapConsumer } from "source-map-js";
 
 let rawFrames: any[];
 let capturedFrames: any[];
@@ -135,6 +138,134 @@ test.describe("source map", () => {
 
     for (const f of fixture) {
       expect(f.filename).toContain("lib.rs");
+    }
+  });
+
+  test("resolved lines contain expected source code", async ({
+    browserName,
+  }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+
+    const source = readFileSync(
+      join(__dirname, "fixture/src/lib.rs"),
+      "utf-8"
+    ).split("\n");
+
+    for (const [fn_name, expected] of [
+      ["wacks_test_fixture::level_3", "panic!"],
+      ["wacks_test_fixture::level_2", "level_3()"],
+      ["wacks_test_fixture::level_1", "level_2()"],
+    ]) {
+      const f = frames.find((f: any) => f.function === fn_name);
+      expect(f, `frame for ${fn_name}`).toBeDefined();
+      const line = source[f.lineno - 1];
+      expect(line, `${fn_name} at line ${f.lineno}`).toContain(expected);
+    }
+  });
+});
+
+test.describe("source map proxy", () => {
+  let frames: any[];
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("http://localhost:3333");
+    await page.waitForFunction(() => (window as any).__wasm_ready === true);
+
+    await page.evaluate(() => {
+      (window as any).setup_source_map_proxy("app.wasm.js");
+    });
+
+    await page.evaluate(() => (window as any).triggerPanic());
+    frames = await page.evaluate(() => (window as any).__captured_frames);
+  });
+
+  test("rewrites wasm frames as JS-compatible locations", async ({
+    browserName,
+  }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+    const wasm = wasmOf(frames).filter((f) => f.filename);
+    expect(wasm.length).toBeGreaterThan(0);
+
+    for (const f of wasm) {
+      expect(f.filename).toBe("app.wasm.js");
+      expect(f.lineno).toBe(1);
+      expect(f.colno).toBeGreaterThan(0);
+    }
+  });
+
+  test("proxy frames resolve via standard JS source map consumer", async ({
+    browserName,
+  }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+
+    const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
+    const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
+    const consumer = new SourceMapConsumer(mapJson);
+
+    const fixture = wasmOf(frames).filter(
+      (f) =>
+        f.colno != null &&
+        f.function &&
+        /^wacks_test_fixture::level_\d$/.test(f.function)
+    );
+    expect(fixture.length).toBeGreaterThan(0);
+
+    for (const f of fixture) {
+      const original = consumer.originalPositionFor({
+        line: f.lineno,
+        column: f.colno,
+      });
+
+      expect(original.source).toContain("lib.rs");
+      expect(original.line).toBeGreaterThan(0);
+    }
+  });
+
+  test("source map embeds fixture source code", async () => {
+    const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
+    const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
+    const consumer = new SourceMapConsumer(mapJson);
+
+    // The fixture's lib.rs appears as "src/lib.rs" (relative DWARF path)
+    const fixtureSource = consumer.sources.find(
+      (s: string) => s === "src/lib.rs"
+    );
+    expect(fixtureSource).toBeDefined();
+
+    const embedded = consumer.sourceContentFor(fixtureSource!);
+    const actual = readFileSync(join(__dirname, "fixture/src/lib.rs"), "utf-8");
+    expect(embedded).toBe(actual);
+  });
+
+  test("resolved source lines match embedded content", async ({
+    browserName,
+  }) => {
+    test.skip(browserName === "webkit", "WebKit omits wasm byte offsets");
+
+    const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
+    const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
+    const consumer = new SourceMapConsumer(mapJson);
+
+    for (const [fn_name, expected] of [
+      ["wacks_test_fixture::level_3", "panic!"],
+      ["wacks_test_fixture::level_2", "level_3()"],
+      ["wacks_test_fixture::level_1", "level_2()"],
+    ]) {
+      const f = wasmOf(frames).find((f: any) => f.function === fn_name);
+      expect(f, `frame for ${fn_name}`).toBeDefined();
+
+      const original = consumer.originalPositionFor({
+        line: f.lineno,
+        column: f.colno,
+      });
+
+      const content = consumer.sourceContentFor(original.source);
+      expect(content, `sourcesContent for ${fn_name}`).not.toBeNull();
+      const lines = content!.split("\n");
+      expect(
+        lines[original.line - 1],
+        `${fn_name} at line ${original.line}`
+      ).toContain(expected);
     }
   });
 });

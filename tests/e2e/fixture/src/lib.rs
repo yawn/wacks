@@ -61,6 +61,11 @@ pub fn setup_source_map(json: &str) {
 }
 
 #[wasm_bindgen]
+pub fn setup_source_map_proxy(filename: &str) {
+    wacks::init_source_map_proxy(filename);
+}
+
+#[wasm_bindgen]
 pub fn trigger_panic() {
     level_1();
 }

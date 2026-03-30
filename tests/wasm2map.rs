@@ -81,5 +81,5 @@ fn rejects_wrong_arg_count() {
         .expect("failed to run wasm2map");
 
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("usage:"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Usage:"));
 }

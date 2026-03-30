@@ -56,6 +56,9 @@ cfg_if::cfg_if! {
         #[cfg(feature = "source-map")]
         pub use capture::init_source_map;
 
+        #[cfg(feature = "source-map-proxy")]
+        pub use capture::init_source_map_proxy;
+
         /// Install a panic hook that passes structured frames to `callback`.
         ///
         /// This is a convenience wrapper around [`std::panic::set_hook`] +

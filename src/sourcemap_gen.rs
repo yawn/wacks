@@ -9,7 +9,7 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::env;
+use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow};
 use gimli::{ColumnType, Dwarf, EndianSlice, LittleEndian};
@@ -60,14 +60,21 @@ impl<'a> DwarfReader<'a> {
         })
     }
 
-    fn collect_entries(&self) -> Result<(Vec<String>, Vec<Entry>)> {
+    /// Collect DWARF line entries, returning display paths, absolute paths
+    /// (for reading source content), and mapping entries.
+    fn collect_entries(&self) -> Result<(Vec<String>, Vec<String>, Vec<Entry>)> {
         let mut sources: Vec<String> = Vec::new();
+        let mut abs_sources: Vec<String> = Vec::new();
         let mut source_idx: BTreeMap<String, usize> = BTreeMap::new();
         let mut entries: Vec<Entry> = Vec::new();
         let mut units = self.dwarf.units();
 
         while let Some(header) = units.next()? {
             let unit = self.dwarf.unit(header)?;
+            let comp_dir = unit
+                .comp_dir
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let Some(prog) = unit.line_program.clone() else {
                 continue;
             };
@@ -101,7 +108,13 @@ impl<'a> DwarfReader<'a> {
                 };
 
                 let idx = *source_idx.entry(path.clone()).or_insert_with(|| {
+                    let abs = if path.starts_with('/') || comp_dir.is_empty() {
+                        path.clone()
+                    } else {
+                        format!("{comp_dir}/{path}")
+                    };
                     sources.push(path);
+                    abs_sources.push(abs);
                     sources.len() - 1
                 });
 
@@ -120,7 +133,7 @@ impl<'a> DwarfReader<'a> {
             }
         }
 
-        Ok((sources, entries))
+        Ok((sources, abs_sources, entries))
     }
 
     fn encode_vlq_mappings(entries: &[Entry]) -> Result<String> {
@@ -182,17 +195,27 @@ pub fn generate(wasm: &[u8]) -> Result<(serde_json::Value, usize)> {
     let obj = File::parse(wasm).context("parsing wasm object")?;
     let reader = DwarfReader::new(&obj, code_offset)?;
 
-    let (sources, mut entries) = reader.collect_entries()?;
+    let (raw_sources, abs_sources, mut entries) = reader.collect_entries()?;
 
     entries.sort_by_key(|e| e.addr);
 
     let mappings = DwarfReader::encode_vlq_mappings(&entries)?;
     let num_mappings = entries.len();
+
+    let sources_content: Vec<serde_json::Value> = abs_sources
+        .iter()
+        .map(|path| {
+            fs::read_to_string(path)
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null)
+        })
+        .collect();
+
     let home_prefix = env::var("HOME")
         .map(|h| format!("{}/", h.replace('\\', "/")))
         .unwrap_or_default();
 
-    let sources: Vec<String> = sources
+    let sources: Vec<String> = raw_sources
         .into_iter()
         .map(|s| s.replace('\\', "/"))
         .map(|s| make_relative(&s, &home_prefix))
@@ -201,6 +224,7 @@ pub fn generate(wasm: &[u8]) -> Result<(serde_json::Value, usize)> {
     let map = json!({
         "version": 3,
         "sources": sources,
+        "sourcesContent": sources_content,
         "names": [],
         "mappings": mappings,
     });
