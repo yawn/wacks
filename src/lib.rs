@@ -42,6 +42,9 @@ mod namesec;
 #[cfg(feature = "source-map")]
 mod sourcemap;
 
+#[cfg(feature = "source-map-gen")]
+pub mod sourcemap_gen;
+
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         mod capture;

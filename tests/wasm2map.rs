@@ -50,22 +50,28 @@ fn deterministic_output() {
 }
 
 #[test]
-fn sources_are_relative_paths() {
+fn sources_contain_no_absolute_paths_or_pii() {
     let Some(wasm) = fixture_wasm() else { return };
     let out = std::env::temp_dir().join("wacks-wasm2map-relative.map");
 
     run_wasm2map(&wasm, &out);
 
-    let map: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let json = std::fs::read_to_string(&out).unwrap();
+    let map: serde_json::Value = serde_json::from_str(&json).unwrap();
 
     for source in map["sources"].as_array().unwrap() {
         let path = source.as_str().unwrap();
-        assert!(
-            !path.starts_with('/'),
-            "source map must not contain absolute paths: {path}",
-        );
+        assert!(!path.starts_with('/'), "absolute path: {path}");
     }
+
+    // The full JSON must not contain any home-directory fragment that could
+    // leak a username. This catches both `sources` values and any future
+    // field that might embed paths.
+    let home = std::env::var("HOME").unwrap();
+    assert!(
+        !json.contains(&home),
+        "source map leaks home directory: {home}",
+    );
 }
 
 #[test]
