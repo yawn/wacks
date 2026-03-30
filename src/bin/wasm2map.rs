@@ -1,34 +1,34 @@
 //! CLI wrapper for [`wacks::sourcemap_gen::generate`].
-//!
-//! Usage: `wasm2map <input.wasm> <output.wasm.map>`
 
-use std::{env, fs, process};
+use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
+use clap::Parser;
 
-fn main() {
-    let run = || -> Result<()> {
-        let args: Vec<String> = env::args().collect();
-        if args.len() != 3 {
-            return Err(anyhow!("usage: wasm2map <input.wasm> <output.wasm.map>"));
-        }
+/// Generate a source map from a WASM binary.
+#[derive(Parser)]
+#[command(version)]
+struct Args {
+    /// Input WASM file
+    input: PathBuf,
+    /// Output source map file
+    output: PathBuf,
+}
 
-        let data = fs::read(&args[1]).context(format!("opening {}", &args[1]))?;
-        let (map, num_mappings) = wacks::sourcemap_gen::generate(&data)?;
+fn main() -> Result<()> {
+    let cli = Args::parse();
 
-        let sources_len = map["sources"].as_array().map(|a| a.len()).unwrap_or(0);
-        fs::write(&args[2], serde_json::to_string(&map)?).context("writing output")?;
+    let data = fs::read(&cli.input).context(format!("opening {}", cli.input.display()))?;
+    let (map, num_mappings) = wacks::sourcemap_gen::generate(&data)?;
 
-        eprintln!(
-            "wasm2map: {sources_len} sources, {num_mappings} mappings → {}",
-            &args[2]
-        );
+    let sources_len = map["sources"].as_array().map(|a| a.len()).unwrap_or(0);
 
-        Ok(())
-    };
+    fs::write(&cli.output, serde_json::to_string(&map)?).context("writing output")?;
 
-    if let Err(err) = run() {
-        eprintln!("wasm2map: {err:#}");
-        process::exit(1);
-    }
+    eprintln!(
+        "wasm2map: {sources_len} sources, {num_mappings} mappings → {}",
+        cli.output.display()
+    );
+
+    Ok(())
 }
