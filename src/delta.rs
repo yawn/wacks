@@ -9,6 +9,10 @@ pub(crate) struct Delta;
 impl Delta {
     /// Delta-encode a sorted sequence of absolute u32 values.
     pub(crate) fn encode(values: &[u32]) -> Vec<u32> {
+        debug_assert!(
+            values.windows(2).all(|w| w[0] <= w[1]),
+            "Delta::encode requires sorted input",
+        );
         let mut prev = 0u32;
         values
             .iter()
