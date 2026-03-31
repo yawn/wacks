@@ -1,8 +1,9 @@
-//! Build-time framemap generator for WebKit byte offset resolution.
+//! Build-time framemap generator.
 //!
-//! Parses WASM instructions to build a call-site index mapping
-//! `(caller, callee) → byte_offset`, enabling exact source map resolution
-//! for WebKit frames that only provide function indices.
+//! Parses WASM instructions to build a call-site index and, when DWARF
+//! debug info is present, a byte-offset → source location table. The
+//! resulting framemap enables both WebKit byte offset resolution and
+//! runtime source location resolution without external source maps.
 //!
 //! ```rust,ignore
 //! let wasm = std::fs::read("app.wasm")?;
@@ -10,8 +11,13 @@
 //! std::fs::write("app.framemap", framemap)?;
 //! ```
 
+use std::collections::BTreeMap;
+use std::env;
+
 use anyhow::{Context, Result, anyhow};
+use gimli::{ColumnType, Dwarf, EndianSlice, LittleEndian};
 use leb128::read::unsigned as read_leb128;
+use object::{File, Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use wasmparser::{Operator, Parser, Payload};
 
@@ -23,12 +29,23 @@ pub struct CallSite {
     pub offset: u64,
 }
 
-/// Framemap: function-start offsets + call-site index for byte offset resolution.
+/// Framemap: call-site index, function starts, and optional DWARF line info.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Framemap {
     pub num_imports: u32,
     pub function_starts: Vec<u64>,
     pub call_sites: Vec<CallSite>,
+    pub sources: Vec<String>,
+    pub line_entries: Vec<LineEntry>,
+}
+
+/// DWARF line entry: byte offset → source location.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LineEntry {
+    pub addr: u64,
+    pub source_idx: u32,
+    pub line: u32,
+    pub col: u32,
 }
 
 struct WasmReader<'a> {
@@ -179,14 +196,122 @@ impl<'a> WasmReader<'a> {
     }
 }
 
+type Reader<'a> = EndianSlice<'a, LittleEndian>;
+
+/// Collect DWARF line entries from a WASM binary, if debug info is present.
+fn collect_dwarf_lines(wasm: &[u8]) -> Result<(Vec<String>, Vec<LineEntry>)> {
+    let code_offset = WasmReader::find_section_start(wasm, 10)
+        .map(|pos| pos as u64)
+        .unwrap_or(0);
+
+    let obj = match File::parse(wasm) {
+        Ok(obj) => obj,
+        Err(_) => return Ok((Vec::new(), Vec::new())),
+    };
+
+    let dwarf = match Dwarf::load(|id| {
+        let data = obj
+            .section_by_name(id.name())
+            .and_then(|s| s.data().ok())
+            .unwrap_or_default();
+        Ok::<_, gimli::Error>(Reader::new(data, LittleEndian))
+    }) {
+        Ok(d) => d,
+        Err(_) => return Ok((Vec::new(), Vec::new())),
+    };
+
+    let home_prefix = env::var("HOME")
+        .map(|h| format!("{}/", h.replace('\\', "/")))
+        .unwrap_or_default();
+
+    let mut sources: Vec<String> = Vec::new();
+    let mut source_idx: BTreeMap<String, usize> = BTreeMap::new();
+    let mut entries: Vec<LineEntry> = Vec::new();
+    let mut units = dwarf.units();
+
+    while let Some(header) = units.next()? {
+        let unit = dwarf.unit(header)?;
+        let Some(prog) = unit.line_program.clone() else {
+            continue;
+        };
+
+        let mut rows = prog.rows();
+
+        while let Some((header, row)) = rows.next_row()? {
+            if row.end_sequence() {
+                continue;
+            }
+
+            let file = row.file(header).context("missing file entry")?;
+            let dir = file
+                .directory(header)
+                .map(|d| {
+                    dwarf
+                        .attr_string(&unit, d)
+                        .map(|s| s.to_string_lossy().into_owned())
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let name = dwarf
+                .attr_string(&unit, file.path_name())?
+                .to_string_lossy()
+                .into_owned();
+            let path = if dir.is_empty() {
+                name
+            } else {
+                format!("{dir}/{name}")
+            };
+
+            let display_path = make_relative(&path.replace('\\', "/"), &home_prefix);
+
+            let idx = *source_idx.entry(display_path.clone()).or_insert_with(|| {
+                sources.push(display_path);
+                sources.len() - 1
+            });
+
+            let line = row.line().map(|l| l.get() as u32).unwrap_or(0);
+            let col = match row.column() {
+                ColumnType::LeftEdge => 0,
+                ColumnType::Column(c) => c.get() as u32,
+            };
+
+            entries.push(LineEntry {
+                addr: row.address() + code_offset,
+                source_idx: idx as u32,
+                line,
+                col,
+            });
+        }
+    }
+
+    entries.sort_by_key(|e| e.addr);
+    Ok((sources, entries))
+}
+
+/// Strip a DWARF source path to a PII-free relative form.
+fn make_relative(path: &str, home_prefix: &str) -> String {
+    if !home_prefix.is_empty()
+        && let Some(rest) = path.strip_prefix(home_prefix)
+    {
+        return rest.to_string();
+    }
+    path.strip_prefix('/').unwrap_or(path).to_string()
+}
+
 /// Generate a serialized framemap from a WASM binary.
+///
+/// Includes DWARF line info when debug info is present, enabling runtime
+/// source location resolution without external source maps.
 pub fn generate(wasm: &[u8]) -> Result<Vec<u8>> {
     let reader = WasmReader::new(wasm)?;
+    let (sources, line_entries) = collect_dwarf_lines(wasm).unwrap_or_default();
 
     let framemap = Framemap {
         num_imports: reader.num_imports,
         function_starts: reader.collect_function_starts()?,
         call_sites: reader.collect_call_sites()?,
+        sources,
+        line_entries,
     };
 
     postcard::to_allocvec(&framemap).context("serializing framemap")
@@ -211,6 +336,11 @@ mod tests {
                 CallSite { caller: 3, callee: 4, offset: 120 },
                 CallSite { caller: 4, callee: 5, offset: 220 },
             ],
+            sources: vec!["src/lib.rs".into(), "src/main.rs".into()],
+            line_entries: vec![
+                LineEntry { addr: 100, source_idx: 0, line: 10, col: 5 },
+                LineEntry { addr: 200, source_idx: 1, line: 42, col: 9 },
+            ],
         };
 
         let bytes = postcard::to_allocvec(&framemap).unwrap();
@@ -220,5 +350,46 @@ mod tests {
         assert_eq!(parsed.function_starts, vec![100, 200, 300]);
         assert_eq!(parsed.call_sites.len(), 2);
         assert_eq!(parsed.call_sites[0], CallSite { caller: 3, callee: 4, offset: 120 });
+        assert_eq!(parsed.sources, vec!["src/lib.rs", "src/main.rs"]);
+        assert_eq!(parsed.line_entries.len(), 2);
+        assert_eq!(parsed.line_entries[0], LineEntry { addr: 100, source_idx: 0, line: 10, col: 5 });
+    }
+
+    #[test]
+    fn roundtrip_framemap_without_dwarf() {
+        let framemap = Framemap {
+            num_imports: 1,
+            function_starts: vec![50],
+            call_sites: vec![],
+            sources: vec![],
+            line_entries: vec![],
+        };
+
+        let bytes = postcard::to_allocvec(&framemap).unwrap();
+        let parsed: Framemap = postcard::from_bytes(&bytes).unwrap();
+
+        assert!(parsed.sources.is_empty());
+        assert!(parsed.line_entries.is_empty());
+    }
+
+    #[test]
+    fn make_relative_strips_home() {
+        assert_eq!(
+            make_relative("/home/user/project/src/main.rs", "/home/user/"),
+            "project/src/main.rs",
+        );
+    }
+
+    #[test]
+    fn make_relative_strips_leading_slash() {
+        assert_eq!(
+            make_relative("/rustc/abc/library/core/src/ptr.rs", "/home/user/"),
+            "rustc/abc/library/core/src/ptr.rs",
+        );
+    }
+
+    #[test]
+    fn make_relative_preserves_relative() {
+        assert_eq!(make_relative("src/lib.rs", "/home/user/"), "src/lib.rs");
     }
 }

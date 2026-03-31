@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { test, expect } from "@playwright/test";
-import { SourceMapConsumer } from "source-map-js";
 
 const wasmOf = (frames: any[]) =>
   frames.filter((f) => f.wasm_function_index != null);
@@ -79,41 +78,39 @@ test.describe("capture()", () => {
   });
 });
 
-test.describe("source map", () => {
+test.describe("source locations", () => {
   let frames: any[];
 
   test.beforeEach(async ({ page }) => {
     await page.goto("http://localhost:3333");
     await page.waitForFunction(() => (window as any).__wasm_ready === true);
-    await page.evaluate(() => (window as any).install_hook_with_sourcemap_and_framemap("app.wasm.js"));
+    await page.evaluate(() => (window as any).install_hook_with_framemap());
     await page.evaluate(() => (window as any).triggerPanic());
     frames = await page.evaluate(() => (window as any).__captured_frames);
   });
 
-  test("source map embeds fixture source code", async () => {
-    const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
-    const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
-    const consumer = new SourceMapConsumer(mapJson);
-
-    // The fixture's lib.rs appears as "src/lib.rs" (relative DWARF path)
-    const fixtureSource = consumer.sources.find(
-      (s: string) => s === "src/lib.rs"
+  test("resolved frames have filename, lineno, and colno", async () => {
+    const resolved = wasmOf(frames).filter(
+      (f) => f.filename && f.lineno != null && f.colno != null
     );
-    expect(fixtureSource).toBeDefined();
-
-    const embedded = consumer.sourceContentFor(fixtureSource!);
-    const actual = readFileSync(join(__dirname, "fixture/src/lib.rs"), "utf-8");
-    expect(embedded).toBe(actual);
+    expect(resolved.length).toBeGreaterThan(0);
   });
 
-  test("resolved source lines match embedded content", async ({
-    browserName,
-  }) => {
-    const mapPath = join(__dirname, "static/pkg/wacks_test_fixture_bg.wasm.map");
-    const mapJson = JSON.parse(readFileSync(mapPath, "utf-8"));
-    const consumer = new SourceMapConsumer(mapJson);
+  test("fixture source paths are relative", async () => {
+    const resolved = wasmOf(frames).filter((f) => f.filename);
 
-    const CONTEXT_LINES = 5;
+    for (const f of resolved) {
+      expect(f.filename).not.toMatch(/^\//);
+      expect(f.filename).not.toContain("/Users/");
+      expect(f.filename).not.toContain("/home/");
+    }
+  });
+
+  test("resolved source lines match fixture source", async () => {
+    const source = readFileSync(
+      join(__dirname, "fixture/src/lib.rs"),
+      "utf-8"
+    ).split("\n");
 
     for (const [fn_name, expected] of [
       ["wacks_test_fixture::pipeline::commit", "panic!"],
@@ -129,37 +126,11 @@ test.describe("source map", () => {
     ]) {
       const f = wasmOf(frames).find((f: any) => f.function === fn_name);
       expect(f, `frame for ${fn_name}`).toBeDefined();
+      expect(f.filename, `filename for ${fn_name}`).toMatch(/src\/lib\.rs$/);
+      expect(f.lineno, `lineno for ${fn_name}`).toBeGreaterThan(0);
 
-      const original = consumer.originalPositionFor({
-        line: f.lineno,
-        column: f.colno,
-      });
-
-      const content = consumer.sourceContentFor(original.source);
-      expect(content, `sourcesContent for ${fn_name}`).not.toBeNull();
-      const lines = content!.split("\n");
-
-      const context_line = lines[original.line - 1];
+      const context_line = source[f.lineno - 1];
       expect(context_line, `context_line for ${fn_name}`).toContain(expected);
-
-      const pre_context = lines.slice(
-        Math.max(0, original.line - 1 - CONTEXT_LINES),
-        original.line - 1
-      );
-      const post_context = lines.slice(
-        original.line,
-        original.line + CONTEXT_LINES
-      );
-
-      expect(
-        pre_context.length + post_context.length,
-        `surrounding context for ${fn_name}`
-      ).toBeGreaterThan(0);
-
-      // Full context reconstructs a contiguous source window
-      const window = [...pre_context, context_line, ...post_context];
-      expect(window.every((l) => typeof l === "string")).toBe(true);
-      expect(window.length).toBeGreaterThanOrEqual(CONTEXT_LINES);
     }
   });
 });

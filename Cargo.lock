@@ -478,12 +478,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
-name = "vlq"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65dd7eed29412da847b0f78bcec0ac98588165988a8cfe41d4ea1d429f8ccfff"
-
-[[package]]
 name = "wacks"
 version = "0.1.0"
 dependencies = [
@@ -497,7 +491,6 @@ dependencies = [
  "rustc-demangle",
  "serde",
  "serde_json",
- "vlq",
  "wasm-bindgen",
  "wasmparser 0.229.0",
 ]

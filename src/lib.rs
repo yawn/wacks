@@ -9,7 +9,7 @@
 //!
 //! ```rust,ignore
 //! wacks::Builder::new()
-//!     .sourcemap("app.wasm.js")
+//!     .framemap(include_bytes!("app.framemap"))
 //!     .install(|frames, info| {
 //!         // forward to your error reporter …
 //!     });
@@ -37,15 +37,11 @@ pub use frame::Frame;
 #[cfg(feature = "framemap-gen")]
 pub mod framemap_gen;
 
-#[cfg(feature = "sourcemap-gen")]
-pub mod sourcemap_gen;
-
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         mod builder;
         mod framemap;
         mod namesec;
-        mod sourcemap;
 
         pub use builder::Builder;
     } else if #[cfg(test)] {

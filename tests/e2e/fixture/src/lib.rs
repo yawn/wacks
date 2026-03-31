@@ -25,16 +25,8 @@ pub fn install_hook() {
 }
 
 #[wasm_bindgen]
-pub fn install_hook_with_sourcemap(filename: &str) {
+pub fn install_hook_with_framemap(framemap: &[u8]) {
     Builder::new()
-        .sourcemap(filename)
-        .install(on_panic);
-}
-
-#[wasm_bindgen]
-pub fn install_hook_with_sourcemap_and_framemap(filename: &str, framemap: &[u8]) {
-    Builder::new()
-        .sourcemap(filename)
         .framemap(framemap)
         .install(on_panic);
 }

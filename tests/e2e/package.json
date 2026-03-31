@@ -2,7 +2,6 @@
   "private": true,
   "devDependencies": {
     "@playwright/test": "^1.52.0",
-    "@types/node": "^25.5.0",
-    "source-map-js": "^1.2.0"
+    "@types/node": "^25.5.0"
   }
 }
