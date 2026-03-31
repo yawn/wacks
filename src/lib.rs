@@ -40,12 +40,18 @@ pub mod framemap_gen;
 
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
+        mod wire;
         mod builder;
         mod framemap;
         mod namesec;
 
         pub use builder::Builder;
+    } else if #[cfg(feature = "framemap-gen")] {
+        mod wire;
+        mod framemap;
+        mod namesec;
     } else if #[cfg(test)] {
+        mod wire;
         mod framemap;
         mod namesec;
     }

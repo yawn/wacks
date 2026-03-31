@@ -18,37 +18,10 @@ use anyhow::{Context, Result, anyhow};
 use gimli::{ColumnType, Dwarf, EndianSlice, LittleEndian};
 use leb128::read::unsigned as read_leb128;
 use object::{File, Object, ObjectSection};
-use serde::{Deserialize, Serialize};
 use wasmparser::{Operator, Parser, Payload};
 
 use crate::delta::Delta;
-
-/// Call site entry: a direct `call` instruction within a WASM function.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CallSite {
-    pub caller: u32,
-    pub callee: u32,
-    pub offset: u32,
-}
-
-/// Framemap: call-site index, function starts, and optional DWARF line info.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Framemap {
-    pub num_imports: u32,
-    pub function_starts: Vec<u32>,
-    pub call_sites: Vec<CallSite>,
-    pub sources: Vec<String>,
-    pub line_entries: Vec<LineEntry>,
-}
-
-/// DWARF line entry: byte offset → source location.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LineEntry {
-    pub addr: u32,
-    pub source_idx: u32,
-    pub line: u32,
-    pub col: u32,
-}
+use crate::wire::{CallSite, Framemap, LineEntry};
 
 struct WasmReader<'a> {
     data: &'a [u8],

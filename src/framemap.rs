@@ -7,37 +7,10 @@
 use std::cell::OnceCell;
 
 use postcard::from_bytes;
-use serde::{Deserialize, Serialize};
 
 use crate::Frame;
 use crate::delta::Delta;
-
-/// Call site entry: a direct `call` instruction within a WASM function.
-#[derive(Deserialize, Serialize)]
-pub(crate) struct CallSite {
-    pub(crate) caller: u32,
-    pub(crate) callee: u32,
-    pub(crate) offset: u32,
-}
-
-/// DWARF line entry: byte offset → source location.
-#[derive(Deserialize, Serialize)]
-pub(crate) struct LineEntry {
-    pub(crate) addr: u32,
-    pub(crate) source_idx: u32,
-    pub(crate) line: u32,
-    pub(crate) col: u32,
-}
-
-/// Serialized framemap format (must match `framemap_gen::Framemap`).
-#[derive(Deserialize, Serialize)]
-struct RawFramemap {
-    num_imports: u32,
-    function_starts: Vec<u32>,
-    call_sites: Vec<CallSite>,
-    sources: Vec<String>,
-    line_entries: Vec<LineEntry>,
-}
+use crate::wire::{CallSite, Framemap as RawFramemap, LineEntry};
 
 /// Parsed framemap optimized for runtime lookups.
 pub(crate) struct ResolvedFramemap {
