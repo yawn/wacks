@@ -8,6 +8,7 @@ repository = "https://github.com/yawn/wacks"
 readme = "README.md"
 keywords = ["wasm", "panic", "stacktrace", "debugging", "wasm-bindgen"]
 categories = ["wasm", "development-tools::debugging"]
+exclude = [".cargo/", ".claude/", ".github/", "tests/e2e/", "mise.toml", "NEXT"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
