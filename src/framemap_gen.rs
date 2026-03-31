@@ -26,14 +26,14 @@ use wasmparser::{Operator, Parser, Payload};
 pub struct CallSite {
     pub caller: u32,
     pub callee: u32,
-    pub offset: u64,
+    pub offset: u32,
 }
 
 /// Framemap: call-site index, function starts, and optional DWARF line info.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Framemap {
     pub num_imports: u32,
-    pub function_starts: Vec<u64>,
+    pub function_starts: Vec<u32>,
     pub call_sites: Vec<CallSite>,
     pub sources: Vec<String>,
     pub line_entries: Vec<LineEntry>,
@@ -42,7 +42,7 @@ pub struct Framemap {
 /// DWARF line entry: byte offset → source location.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LineEntry {
-    pub addr: u64,
+    pub addr: u32,
     pub source_idx: u32,
     pub line: u32,
     pub col: u32,
@@ -68,7 +68,7 @@ impl<'a> WasmReader<'a> {
                     .context("reading operators")?;
 
                 while !reader.eof() {
-                    let offset = reader.original_position() as u64;
+                    let offset = reader.original_position() as u32;
                     let op = reader.read().context("reading operator")?;
 
                     if let Operator::Call { function_index: callee } = op {
@@ -88,7 +88,7 @@ impl<'a> WasmReader<'a> {
     }
 
     /// Walk the code section to find each function's first-instruction byte offset.
-    fn collect_function_starts(&self) -> Result<Vec<u64>> {
+    fn collect_function_starts(&self) -> Result<Vec<u32>> {
         let code_start = Self::find_section_start(self.data, 10)?;
         let mut pos = code_start;
         let mut rest = &self.data[pos..];
@@ -109,7 +109,7 @@ impl<'a> WasmReader<'a> {
                 body = body.get(1..).context("valtype")?;
             }
 
-            starts.push((body_start + body_size - body.len()) as u64);
+            starts.push((body_start + body_size - body.len()) as u32);
             pos = body_start + body_size;
         }
 
@@ -201,7 +201,7 @@ type Reader<'a> = EndianSlice<'a, LittleEndian>;
 /// Collect DWARF line entries from a WASM binary, if debug info is present.
 fn collect_dwarf_lines(wasm: &[u8]) -> Result<(Vec<String>, Vec<LineEntry>)> {
     let code_offset = WasmReader::find_section_start(wasm, 10)
-        .map(|pos| pos as u64)
+        .map(|pos| pos as u32)
         .unwrap_or(0);
 
     let obj = match File::parse(wasm) {
@@ -276,7 +276,7 @@ fn collect_dwarf_lines(wasm: &[u8]) -> Result<(Vec<String>, Vec<LineEntry>)> {
             };
 
             entries.push(LineEntry {
-                addr: row.address() + code_offset,
+                addr: row.address() as u32 + code_offset,
                 source_idx: idx as u32,
                 line,
                 col,
@@ -347,7 +347,7 @@ mod tests {
         let parsed: Framemap = postcard::from_bytes(&bytes).unwrap();
 
         assert_eq!(parsed.num_imports, 3);
-        assert_eq!(parsed.function_starts, vec![100, 200, 300]);
+        assert_eq!(parsed.function_starts, vec![100u32, 200, 300]);
         assert_eq!(parsed.call_sites.len(), 2);
         assert_eq!(parsed.call_sites[0], CallSite { caller: 3, callee: 4, offset: 120 });
         assert_eq!(parsed.sources, vec!["src/lib.rs", "src/main.rs"]);

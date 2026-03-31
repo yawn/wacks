@@ -16,13 +16,13 @@ use crate::Frame;
 pub(crate) struct CallSite {
     pub(crate) caller: u32,
     pub(crate) callee: u32,
-    pub(crate) offset: u64,
+    pub(crate) offset: u32,
 }
 
 /// DWARF line entry: byte offset → source location.
 #[derive(Deserialize, Serialize)]
 pub(crate) struct LineEntry {
-    pub(crate) addr: u64,
+    pub(crate) addr: u32,
     pub(crate) source_idx: u32,
     pub(crate) line: u32,
     pub(crate) col: u32,
@@ -32,7 +32,7 @@ pub(crate) struct LineEntry {
 #[derive(Deserialize, Serialize)]
 struct RawFramemap {
     num_imports: u32,
-    function_starts: Vec<u64>,
+    function_starts: Vec<u32>,
     call_sites: Vec<CallSite>,
     sources: Vec<String>,
     line_entries: Vec<LineEntry>,
@@ -41,9 +41,9 @@ struct RawFramemap {
 /// Parsed framemap optimized for runtime lookups.
 pub(crate) struct ResolvedFramemap {
     num_imports: u32,
-    function_starts: Vec<u64>,
+    function_starts: Vec<u32>,
     /// (caller, callee) → list of call-site byte offsets, sorted by key.
-    call_sites: Vec<((u32, u32), Vec<u64>)>,
+    call_sites: Vec<((u32, u32), Vec<u32>)>,
     /// DWARF line entries sorted by address for binary search.
     line_entries: Vec<LineEntry>,
     /// Source file paths indexed by `LineEntry::source_idx`.
@@ -83,7 +83,7 @@ impl ResolvedFramemap {
             };
         };
 
-        let mut call_sites: Vec<((u32, u32), Vec<u64>)> = Vec::new();
+        let mut call_sites: Vec<((u32, u32), Vec<u32>)> = Vec::new();
         for site in raw.call_sites {
             let key = (site.caller, site.callee);
             match call_sites.binary_search_by_key(&key, |(k, _)| *k) {
@@ -101,9 +101,10 @@ impl ResolvedFramemap {
         }
     }
 
-    fn function_start(&self, index: u32) -> Option<&u64> {
+    fn function_start(&self, index: u32) -> Option<u32> {
         self.function_starts
             .get(index.checked_sub(self.num_imports)? as usize)
+            .copied()
     }
 
     /// Resolve byte offsets for frames using adjacent-pair call-site lookups.
@@ -119,14 +120,14 @@ impl ResolvedFramemap {
                 if let Some(callee) = frames[i - 1].wasm_function_index {
                     let key = (caller, callee);
                     if let Ok(idx) = self.call_sites.binary_search_by_key(&key, |(k, _)| *k) {
-                        frames[i].wasm_byte_offset = Some(self.call_sites[idx].1[0]);
+                        frames[i].wasm_byte_offset = Some(self.call_sites[idx].1[0] as u64);
                         continue;
                     }
                 }
             }
 
-            if let Some(&offset) = self.function_start(caller) {
-                frames[i].wasm_byte_offset = Some(offset);
+            if let Some(offset) = self.function_start(caller) {
+                frames[i].wasm_byte_offset = Some(offset as u64);
             }
         }
     }
@@ -146,7 +147,7 @@ impl ResolvedFramemap {
                 continue;
             };
 
-            let idx = match self.line_entries.binary_search_by_key(&offset, |e| e.addr) {
+            let idx = match self.line_entries.binary_search_by_key(&(offset as u32), |e| e.addr) {
                 Ok(i) => i,
                 Err(0) => continue,
                 Err(i) => i - 1,
