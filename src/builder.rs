@@ -69,6 +69,7 @@ impl Builder {
         }));
     }
 
+    /// Create a new builder with no framemap.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
