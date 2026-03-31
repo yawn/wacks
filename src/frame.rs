@@ -18,7 +18,7 @@ pub struct Frame {
     /// Raw symbol as it appeared in `Error.stack` (e.g. `my_crate::handler::h86f485cc`)
     pub raw_function: Option<String>,
     /// Byte offset within the WASM module
-    pub wasm_byte_offset: Option<u64>,
+    pub wasm_byte_offset: Option<u32>,
     /// WASM function table index
     pub wasm_function_index: Option<u32>,
 }

@@ -102,14 +102,14 @@ impl ResolvedFramemap {
                 if let Some(callee) = frames[i - 1].wasm_function_index {
                     let key = (caller, callee);
                     if let Ok(idx) = self.call_sites.binary_search_by_key(&key, |(k, _)| *k) {
-                        frames[i].wasm_byte_offset = Some(self.call_sites[idx].1[0] as u64);
+                        frames[i].wasm_byte_offset = Some(self.call_sites[idx].1[0]);
                         continue;
                     }
                 }
             }
 
             if let Some(offset) = self.function_start(caller) {
-                frames[i].wasm_byte_offset = Some(offset as u64);
+                frames[i].wasm_byte_offset = Some(offset);
             }
         }
     }
@@ -129,7 +129,7 @@ impl ResolvedFramemap {
                 continue;
             };
 
-            let idx = match self.line_entries.binary_search_by_key(&(offset as u32), |e| e.addr) {
+            let idx = match self.line_entries.binary_search_by_key(&offset, |e| e.addr) {
                 Ok(i) => i,
                 Err(0) => continue,
                 Err(i) => i - 1,
@@ -149,7 +149,7 @@ impl ResolvedFramemap {
 mod tests {
     use super::*;
 
-    fn make_frame(function_index: Option<u32>, byte_offset: Option<u64>) -> Frame {
+    fn make_frame(function_index: Option<u32>, byte_offset: Option<u32>) -> Frame {
         Frame {
             colno: None,
             filename: None,

@@ -22,7 +22,7 @@ enum StackFormat {
 
 /// Parsed WASM location (`wasm-function[index]:0xoffset`).
 struct WasmLocation {
-    byte_offset: Option<u64>,
+    byte_offset: Option<u32>,
     function_index: Option<u32>,
 }
 
@@ -224,7 +224,7 @@ impl WasmLocation {
 
         let byte_offset = after_marker[bracket_end + 1..]
             .strip_prefix(":0x")
-            .and_then(|hex| u64::from_str_radix(hex, 16).ok());
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok());
 
         Self {
             byte_offset,
