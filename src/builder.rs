@@ -52,7 +52,7 @@ impl Builder {
     /// Consumes the builder, initializes the framemap (if provided),
     /// and installs a [`std::panic::set_hook`] that captures structured
     /// frames and passes them to `callback`.
-    pub fn install(self, callback: fn(Vec<Frame>, &PanicHookInfo<'_>)) {
+    pub fn install(self, callback: impl Fn(Vec<Frame>, &PanicHookInfo<'_>) + 'static) {
         if let Some(data) = self.framemap_data {
             crate::framemap::init(&data);
         }
