@@ -10,6 +10,7 @@ use postcard::from_bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::Frame;
+use crate::delta::Delta;
 
 /// Call site entry: a direct `call` instruction within a WASM function.
 #[derive(Deserialize, Serialize)]
@@ -92,12 +93,20 @@ impl ResolvedFramemap {
             }
         }
 
+        let addrs = Delta::decode(&raw.line_entries.iter().map(|e| e.addr).collect::<Vec<_>>());
+        let line_entries = raw
+            .line_entries
+            .into_iter()
+            .zip(addrs)
+            .map(|(e, addr)| LineEntry { addr, ..e })
+            .collect();
+
         Self {
             num_imports: raw.num_imports,
-            function_starts: raw.function_starts,
+            function_starts: Delta::decode(&raw.function_starts),
             call_sites,
             sources: raw.sources,
-            line_entries: raw.line_entries,
+            line_entries,
         }
     }
 
@@ -181,26 +190,27 @@ mod tests {
     }
 
     fn make_framemap_with_lines() -> ResolvedFramemap {
+        // Values are delta-encoded: function_starts and line_entry addrs
         let raw = RawFramemap {
             num_imports: 0,
-            function_starts: vec![100, 200],
+            function_starts: vec![100, 100],           // absolute: [100, 200]
             call_sites: vec![],
             sources: vec!["src/lib.rs".into(), "src/main.rs".into()],
             line_entries: vec![
                 LineEntry {
-                    addr: 100,
+                    addr: 100,                         // absolute: 100
                     source_idx: 0,
                     line: 10,
                     col: 5,
                 },
                 LineEntry {
-                    addr: 150,
+                    addr: 50,                          // absolute: 150
                     source_idx: 0,
                     line: 15,
                     col: 9,
                 },
                 LineEntry {
-                    addr: 200,
+                    addr: 50,                          // absolute: 200
                     source_idx: 1,
                     line: 42,
                     col: 1,
@@ -224,7 +234,7 @@ mod tests {
     fn resolves_unambiguous_call_site() {
         let raw = RawFramemap {
             num_imports: 2,
-            function_starts: vec![100, 200, 300],
+            function_starts: vec![100, 100, 100],      // absolute: [100, 200, 300]
             call_sites: vec![CallSite {
                 caller: 3,
                 callee: 4,
@@ -251,7 +261,7 @@ mod tests {
     fn skips_frames_with_existing_offset() {
         let raw = RawFramemap {
             num_imports: 0,
-            function_starts: vec![100],
+            function_starts: vec![100],                // absolute: [100]
             call_sites: vec![],
             sources: vec![],
             line_entries: vec![],
@@ -269,7 +279,7 @@ mod tests {
     fn ambiguous_uses_first_call_site() {
         let raw = RawFramemap {
             num_imports: 0,
-            function_starts: vec![100, 200],
+            function_starts: vec![100, 100],           // absolute: [100, 200]
             call_sites: vec![
                 CallSite {
                     caller: 0,
@@ -346,5 +356,49 @@ mod tests {
         fm.resolve_source_locations(&mut frames);
 
         assert!(frames[0].filename.is_none());
+    }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn sorted_u32s(max_len: usize) -> impl Strategy<Value = Vec<u32>> {
+            proptest::collection::vec(0u32..10_000, 0..max_len).prop_map(|deltas| {
+                let mut acc = 0u32;
+                deltas
+                    .into_iter()
+                    .map(|d| {
+                        acc = acc.saturating_add(d);
+                        acc
+                    })
+                    .collect()
+            })
+        }
+
+        proptest! {
+            #[test]
+            fn delta_roundtrip_via_serialization(
+                addrs in sorted_u32s(50),
+                num_imports in 0u32..10,
+            ) {
+                let delta_addrs = Delta::encode(&addrs);
+                let raw = RawFramemap {
+                    num_imports,
+                    function_starts: delta_addrs.clone(),
+                    call_sites: vec![],
+                    sources: vec!["test.rs".into()],
+                    line_entries: delta_addrs.iter().map(|&addr| {
+                        LineEntry { addr, source_idx: 0, line: 1, col: 0 }
+                    }).collect(),
+                };
+
+                let data = postcard::to_allocvec(&raw).unwrap();
+                let fm = ResolvedFramemap::new(&data);
+
+                prop_assert_eq!(&fm.function_starts, &addrs);
+                let decoded_addrs: Vec<u32> = fm.line_entries.iter().map(|e| e.addr).collect();
+                prop_assert_eq!(&decoded_addrs, &addrs);
+            }
+        }
     }
 }

@@ -28,6 +28,7 @@
 //! assert_eq!(frames[0].function.as_deref(), Some("my_crate::handler"));
 //! ```
 
+mod delta;
 mod demangle;
 mod frame;
 mod parse;

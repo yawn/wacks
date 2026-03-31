@@ -21,6 +21,8 @@ use object::{File, Object, ObjectSection};
 use serde::{Deserialize, Serialize};
 use wasmparser::{Operator, Parser, Payload};
 
+use crate::delta::Delta;
+
 /// Call site entry: a direct `call` instruction within a WASM function.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CallSite {
@@ -306,12 +308,20 @@ pub fn generate(wasm: &[u8]) -> Result<Vec<u8>> {
     let reader = WasmReader::new(wasm)?;
     let (sources, line_entries) = collect_dwarf_lines(wasm).unwrap_or_default();
 
+    let addrs: Vec<u32> = line_entries.iter().map(|e| e.addr).collect();
+    let delta_addrs = Delta::encode(&addrs);
+    let delta_line_entries = line_entries
+        .into_iter()
+        .zip(delta_addrs)
+        .map(|(e, addr)| LineEntry { addr, ..e })
+        .collect();
+
     let framemap = Framemap {
         num_imports: reader.num_imports,
-        function_starts: reader.collect_function_starts()?,
+        function_starts: Delta::encode(&reader.collect_function_starts()?),
         call_sites: reader.collect_call_sites()?,
         sources,
-        line_entries,
+        line_entries: delta_line_entries,
     };
 
     postcard::to_allocvec(&framemap).context("serializing framemap")
@@ -392,4 +402,5 @@ mod tests {
     fn make_relative_preserves_relative() {
         assert_eq!(make_relative("src/lib.rs", "/home/user/"), "src/lib.rs");
     }
+
 }

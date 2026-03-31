@@ -33,6 +33,7 @@ framemap-gen = ["dep:anyhow", "dep:clap", "dep:gimli", "dep:object", "dep:postca
 
 [dev-dependencies]
 postcard = { version = "1", features = ["alloc"] }
+proptest = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
