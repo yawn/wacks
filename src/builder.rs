@@ -71,6 +71,12 @@ impl Builder {
 
     #[must_use]
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
         Self {
             framemap_data: None,
         }
