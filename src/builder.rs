@@ -41,6 +41,7 @@ impl Builder {
     /// DWARF debug info. It enables:
     /// - WebKit byte offset resolution (function index → byte offset)
     /// - Source location resolution (byte offset → filename, line, col)
+    #[must_use]
     pub fn framemap(mut self, data: &[u8]) -> Self {
         self.framemap_data = Some(data.to_vec());
         self
@@ -68,6 +69,7 @@ impl Builder {
         }));
     }
 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             framemap_data: None,

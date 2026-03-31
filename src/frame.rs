@@ -26,6 +26,7 @@ pub struct Frame {
 impl Frame {
     /// A WASM frame whose function name was not resolved — typically
     /// because the binary's name section was stripped.
+    #[must_use]
     pub fn is_anonymous(&self) -> bool {
         self.wasm_function_index.is_some() && self.function.is_none()
     }

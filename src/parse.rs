@@ -69,6 +69,7 @@ impl Frame {
     /// they carry no useful information.
     ///
     /// Returns frames in newest-first order (matching browser convention).
+    #[must_use]
     pub fn parse(stack: &str) -> Vec<Self> {
         let format = StackFormat::detect(stack);
 
