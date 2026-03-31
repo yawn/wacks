@@ -10,7 +10,7 @@ use postcard::from_bytes;
 
 use crate::Frame;
 use crate::delta::Delta;
-use crate::wire::{CallSite, Framemap as RawFramemap, LineEntry};
+use crate::wire::{Framemap as RawFramemap, LineEntry};
 
 /// Parsed framemap optimized for runtime lookups.
 pub(crate) struct ResolvedFramemap {
@@ -148,6 +148,7 @@ impl ResolvedFramemap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::CallSite;
 
     fn make_frame(function_index: Option<u32>, byte_offset: Option<u32>) -> Frame {
         Frame {
