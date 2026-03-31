@@ -7,6 +7,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Frame {
+    /// Column number in the source file
     pub colno: Option<u32>,
     /// Source filename from panic location or source map
     pub filename: Option<String>,
@@ -14,6 +15,7 @@ pub struct Frame {
     pub function: Option<String>,
     /// `false` for browser internals, wasm-bindgen glue, std
     pub in_app: bool,
+    /// Line number in the source file
     pub lineno: Option<u32>,
     /// Raw symbol as it appeared in `Error.stack` (e.g. `my_crate::handler::h86f485cc`)
     pub raw_function: Option<String>,
