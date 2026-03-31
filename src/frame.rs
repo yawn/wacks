@@ -3,6 +3,7 @@
 use std::fmt;
 
 /// A single frame from a WASM stack trace.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Frame {
