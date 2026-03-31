@@ -8,7 +8,13 @@ use crate::Frame;
 use crate::namesec::BackfillNames;
 
 #[wasm_bindgen(inline_js = r#"
-export function __wacks_capture_stack() { return new Error().stack || ''; }
+export function __wacks_capture_stack() {
+    const prev = Error.stackTraceLimit;
+    Error.stackTraceLimit = 50;
+    const stack = new Error().stack || '';
+    Error.stackTraceLimit = prev;
+    return stack;
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = "__wacks_capture_stack")]
